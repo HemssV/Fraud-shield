@@ -56,10 +56,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'fraudshield.wsgi.application'
 
-# Database
+# Database — reads DATABASE_URL from .env (Neon PostgreSQL in production, SQLite locally)
 _db_url = config('DATABASE_URL', default='sqlite:///fraudshield_dev.db')
+_db_config = dj_database_url.parse(_db_url, conn_max_age=600, ssl_require=True)
+
+# For Neon PostgreSQL, enforce SSL
+if 'neon.tech' in _db_url:
+    _db_config.setdefault('OPTIONS', {})['sslmode'] = 'require'
+
 DATABASES = {
-    'default': dj_database_url.parse(_db_url, conn_max_age=600)
+    'default': _db_config
 }
 
 # Password validation

@@ -1,195 +1,411 @@
 // src/services/fraudScreeningService.js
 //
-// FRAUD SCREENING SERVICE — the heart of FraudShield
+// FRAUD SCREENING SERVICE — orchestrates the complete fraud detection pipeline
+// and NOW PERSISTS results to Neon PostgreSQL.
 //
-// This is the orchestration layer that implements the complete fraud detection pipeline:
-//
-//   Booking → Gather Signals → Generate Features → Rules + ML + Graph → Risk Aggregator → Decision
-//
-// Architecture principle: upstream services provide SIGNALS, not decisions.
-// The Risk Aggregator fuses signals from all sources into a single risk score,
-// and the Decision Engine maps that score to an action.
-//
-// Signal Fusion Flow:
-//   Account API  → "Device D88 is new"
-//   Payment API  → "Payment P19 is new"
-//   Fraud Signal → "D88 linked to flagged accounts"
-//   Address API  → "Destination confidence = 61%"
-//   Behavior     → "Weight is 3× normal"
-//   ML Model     → "Fraud probability = 0.87"
-//                    ↓
-//            RISK AGGREGATOR
-//                    ↓
-//           FINAL RISK = 91/100
-//                    ↓
-//            HOLD FOR REVIEW
+// Pipeline:
+//   Booking → Upsert entities → Generate features → Rules + ML → Aggregate → Decision
+//           → Save RiskAssessment + Reasons → Save Decision → Open FraudCase if REVIEW/BLOCK
+//           → Write entity_links → Audit log
 
 const { v4: uuidv4 } = require('uuid');
-const { getAccount } = require('./accountService');
-const { getPayment } = require('./paymentService');
-const { getFraudSignals } = require('./fraudSignalService');
-const { getAddressConfidence } = require('./addressService');
+const repo = require('../db/repository');
 const { generateFeatures } = require('../features/featureGenerator');
 const { evaluateRules } = require('../rules/ruleEngine');
 const { scoreShipment } = require('../ml/fraudModel');
 const { decisionThresholds } = require('./mockData');
 const logger = require('../utils/logger');
 
+// ─── DECISION THRESHOLDS ─────────────────────────────────────────────────────
+const WEIGHTS = { rules: 0.40, ml: 0.40, graph: 0.20 };
+
+// ─── PUBLIC: screenShipment ──────────────────────────────────────────────────
 
 /**
- * Screen a shipment for fraud — the complete pipeline.
+ * Screen a shipment for fraud — the complete pipeline with DB persistence.
  *
  * @param {object} booking - The booking request data
- * @returns {object} Complete fraud assessment with risk score, decision, signals, and reasons
+ * @returns {object} Complete fraud assessment
  */
 async function screenShipment(booking) {
   const pipelineStart = Date.now();
-  const shipmentId = booking.shipment_id || `SH${Date.now()}`;
+  const bookingRef = booking.shipment_id || `SH${uuidv4().split('-')[0].toUpperCase()}`;
 
-  logger.info('🔍 Fraud screening started', { shipment_id: shipmentId, shipper_id: booking.shipper_id });
+  logger.info('🔍 Fraud screening started', { booking_ref: bookingRef, shipper_id: booking.shipper_id });
 
-  // ─── STEP 1: Gather upstream signals (parallel in production) ────────
-  const gatherStart = Date.now();
+  // ─── STEP 1: Upsert all entities into Neon ─────────────────────────────────
+  let dbIds = {};
+  let accountProfile = null;
+  let deviceSignalData = null;
 
-  const account = getAccount(booking.shipper_id);
-  const payment = getPayment(booking.payment_id);
-  const deviceSignals = getFraudSignals(booking.device_id);
-  const addressData = getAddressConfidence(
-    booking.destination_address_id || booking.destination
-  );
+  try {
+    dbIds = await _persistEntities(booking, bookingRef);
+    accountProfile = dbIds.accountProfile;
+    deviceSignalData = dbIds.deviceSignalData;
+  } catch (dbErr) {
+    logger.warn('DB entity upsert failed — running in mock mode', { error: dbErr.message });
+  }
 
-  const gatherMs = Date.now() - gatherStart;
-  logger.debug('Upstream signals gathered', { duration_ms: gatherMs });
+  // ─── STEP 2: Build upstream signal objects (from DB or mock fallback) ───────
+  const account = _buildAccountSignal(booking, accountProfile);
+  const payment = _buildPaymentSignal(booking, dbIds.paymentRow);
+  const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData);
+  const addressData = _buildAddressSignal(booking, dbIds.destAddressRow);
 
-  // ─── STEP 2: Generate engineered features ────────────────────────────
+  // ─── STEP 3: Generate engineered features ─────────────────────────────────
   const features = generateFeatures(booking, account, payment, deviceSignals, addressData);
 
-  // ─── STEP 3: Run Rule Engine ─────────────────────────────────────────
+  // ─── STEP 4: Run Rule Engine ───────────────────────────────────────────────
   const ruleResult = evaluateRules(features);
 
-  // ─── STEP 4: Run ML Model ───────────────────────────────────────────
+  // ─── STEP 5: Run ML Model ─────────────────────────────────────────────────
   const mlResult = scoreShipment(features);
 
-  // ─── STEP 5: Risk Aggregation (signal fusion) ───────────────────────
+  // ─── STEP 6: Risk Aggregation ─────────────────────────────────────────────
   const aggregatedRisk = aggregateRisk(ruleResult, mlResult, deviceSignals, features);
 
-  // ─── STEP 6: Decision Engine ─────────────────────────────────────────
+  // ─── STEP 7: Decision Engine ──────────────────────────────────────────────
   const decision = makeDecision(aggregatedRisk.risk_score, aggregatedRisk.risk_level);
 
-  // ─── STEP 7: Generate top reasons ───────────────────────────────────
+  // ─── STEP 8: Generate top reasons ─────────────────────────────────────────
   const topReasons = generateTopReasons(ruleResult, mlResult, features);
 
-  // ─── STEP 8: Compute signal contribution breakdown ──────────────────
+  // ─── STEP 9: Signal breakdown ─────────────────────────────────────────────
   const signalBreakdown = computeSignalBreakdown(ruleResult, mlResult);
+
+  // ─── STEP 10: Persist assessment + decision to Neon ───────────────────────
+  let assessment_id = null;
+  if (dbIds.shipmentId) {
+    try {
+      assessment_id = await repo.saveRiskAssessment({
+        shipment_id: dbIds.shipmentId,
+        risk_score: aggregatedRisk.risk_score,
+        risk_level: aggregatedRisk.risk_level,
+        fraud_probability: mlResult.fraud_probability,
+        rule_score: ruleResult.rule_score,
+        ml_score: mlResult.ml_score,
+        rule_set_version: ruleResult.rules_version,
+        model_version: mlResult.model_version,
+        features: { behavioral: features.behavioral, identity: features.identity, payment: features.payment },
+        triggered_rules: ruleResult.triggered_rules,
+      });
+
+      await repo.saveDecision({
+        shipment_id: dbIds.shipmentId,
+        assessment_id,
+        action: decision.action,
+        reason: decision.reason,
+      });
+
+      // Update shipment status to match decision
+      const statusMap = {
+        ALLOW: 'ALLOWED', ALLOW_MONITOR: 'ALLOWED',
+        VERIFY: 'SCREENING', REVIEW: 'HELD', BLOCK: 'BLOCKED',
+      };
+      await repo.updateShipmentStatus(dbIds.shipmentId, statusMap[decision.action] || 'SCREENING');
+
+      // Auto-open fraud case for REVIEW or BLOCK
+      if (decision.action === 'REVIEW' || decision.action === 'BLOCK') {
+        await repo.openFraudCase({
+          shipment_id: dbIds.shipmentId,
+          assessment_id,
+          account_id: dbIds.accountId,
+          risk_level: aggregatedRisk.risk_level,
+        });
+      }
+
+      // Write entity links to fraud graph
+      if (dbIds.accountId && dbIds.deviceId) {
+        await repo.upsertEntityLink({
+          src_type: 'ACCOUNT', src_id: dbIds.accountId,
+          dst_type: 'DEVICE', dst_id: dbIds.deviceId, link_type: 'USES_DEVICE',
+        });
+      }
+      if (dbIds.accountId && dbIds.paymentId) {
+        await repo.upsertEntityLink({
+          src_type: 'ACCOUNT', src_id: dbIds.accountId,
+          dst_type: 'PAYMENT', dst_id: dbIds.paymentId, link_type: 'USES_PAYMENT',
+        });
+      }
+      if (dbIds.accountId && dbIds.shipmentId) {
+        await repo.upsertEntityLink({
+          src_type: 'ACCOUNT', src_id: dbIds.accountId,
+          dst_type: 'SHIPMENT', dst_id: dbIds.shipmentId, link_type: 'SHIPS_TO',
+        });
+      }
+
+      // Audit log
+      await repo.logAuditEvent({
+        action: 'SCREENED',
+        entity_type: 'SHIPMENT',
+        entity_id: dbIds.shipmentId,
+        shipment_id: dbIds.shipmentId,
+        after_state: { risk_score: aggregatedRisk.risk_score, action: decision.action },
+      });
+
+      // Update shipper profile in background
+      if (dbIds.accountId) {
+        repo.upsertShipperProfile(dbIds.accountId).catch(() => {});
+      }
+    } catch (persistErr) {
+      logger.error('Failed to persist assessment to DB', { error: persistErr.message });
+    }
+  }
 
   const totalMs = Date.now() - pipelineStart;
 
-  const assessment = {
-    shipment_id: shipmentId,
+  logger.info('🛡️ Fraud screening completed', {
+    booking_ref: bookingRef,
+    risk_score: aggregatedRisk.risk_score,
+    risk_level: aggregatedRisk.risk_level,
+    decision: decision.action,
+    assessment_id,
+    latency_ms: totalMs,
+  });
 
+  return {
+    shipment_id: bookingRef,
+    db_ids: { shipment_id: dbIds.shipmentId, assessment_id },
     risk: {
       fraud_probability: mlResult.fraud_probability,
       risk_score: aggregatedRisk.risk_score,
       risk_level: aggregatedRisk.risk_level,
     },
-
-    decision: {
-      action: decision.action,
-      reason: decision.reason,
-    },
-
+    decision: { action: decision.action, reason: decision.reason },
     signals: signalBreakdown,
-
     top_reasons: topReasons,
-
     component_scores: {
       rule_score: ruleResult.rule_score,
       ml_score: mlResult.ml_score,
       device_risk_score: deviceSignals?.risk_score || 0,
       address_confidence: addressData?.confidence_score || 0,
     },
-
     triggered_rules: ruleResult.triggered_rules,
-
-    model: {
-      model_version: mlResult.model_version,
-      rules_version: ruleResult.rules_version,
-    },
-
+    model: { model_version: mlResult.model_version, rules_version: ruleResult.rules_version },
     pipeline: {
-      signal_gather_ms: gatherMs,
-      feature_generation_ms: features._meta.feature_generation_ms,
-      rule_evaluation_ms: ruleResult.evaluation_ms,
-      ml_scoring_ms: mlResult.scoring_ms,
+      signal_gather_ms: 0,
+      feature_generation_ms: features._meta?.feature_generation_ms || 0,
+      rule_evaluation_ms: ruleResult.evaluation_ms || 0,
+      ml_scoring_ms: mlResult.scoring_ms || 0,
       total_latency_ms: totalMs,
     },
-
-    // For audit trail reproducibility
     _input_snapshot: booking,
     _features: features,
     _account_found: !!account,
     _payment_found: !!payment,
   };
-
-  logger.info('🛡️ Fraud screening completed', {
-    shipment_id: shipmentId,
-    risk_score: aggregatedRisk.risk_score,
-    risk_level: aggregatedRisk.risk_level,
-    decision: decision.action,
-    latency_ms: totalMs,
-  });
-
-  return assessment;
 }
 
 
-/**
- * Risk Aggregator — fuses signals from rules, ML, and graph into a single risk score.
- *
- * Weights:
- *   Rule Engine:    40%  (deterministic, explainable)
- *   ML Model:       40%  (statistical patterns)
- *   Device/Graph:   20%  (entity relationship signals)
- */
-function aggregateRisk(ruleResult, mlResult, deviceSignals, features) {
-  const WEIGHTS = {
-    rules: 0.40,
-    ml: 0.40,
-    graph: 0.20,
-  };
+// ─── ENTITY PERSISTENCE ───────────────────────────────────────────────────────
 
+async function _persistEntities(booking, bookingRef) {
+  // 1. Shipper
+  const shipperId = await repo.upsertShipper({
+    external_ref: booking.shipper_id,
+    company_name: booking.shipper_id,
+  });
+
+  // 2. Account
+  const accountId = await repo.upsertAccount({
+    shipper_id: shipperId,
+    account_number: booking.shipper_id,
+  });
+
+  // 3. Account profile from DB (for real behavioral features)
+  const accountProfile = await repo.getAccountProfile(booking.shipper_id);
+
+  // 4. Device
+  const deviceRow = await repo.upsertDevice({
+    fingerprint_hash: booking.device_id || `unknown-${Date.now()}`,
+    device_type: 'api-client',
+  });
+  await repo.linkDeviceToAccount(accountId, deviceRow.device_id);
+  const deviceSignalData = await repo.getDeviceFraudSignals(deviceRow.device_id);
+
+  // 5. Payment
+  let paymentRow = null;
+  let paymentId = null;
+  if (booking.payment_id) {
+    paymentRow = await repo.upsertPayment({
+      payment_token: booking.payment_id,
+      method_type: 'CREDIT_CARD',
+    });
+    paymentId = paymentRow.payment_id;
+    await repo.linkPaymentToAccount(accountId, paymentId, null);
+  }
+
+  // 6. Addresses
+  const originAddr = await repo.upsertAddress({ city: booking.origin || 'Unknown', country: 'IN' });
+  const destAddr = await repo.upsertAddress({ city: booking.destination || 'Unknown', country: 'IN' });
+
+  // 7. Shipment
+  const shipmentRow = await repo.createShipment({
+    booking_ref: bookingRef,
+    account_id: accountId,
+    shipper_id: shipperId,
+    device_id: deviceRow.device_id,
+    payment_id: paymentId,
+    origin_address_id: originAddr.address_id,
+    dest_address_id: destAddr.address_id,
+    service: booking.service_type || 'GROUND',
+    weight_kg: booking.weight || 1,
+    package_count: booking.package_count || 1,
+    ip_address: booking.ip_address,
+    booked_at: booking.booking_timestamp || new Date().toISOString(),
+  });
+
+  return {
+    shipperId, accountId, deviceId: deviceRow.device_id,
+    paymentId, deviceRow, paymentRow,
+    originAddressRow: originAddr, destAddressRow: destAddr,
+    shipmentId: shipmentRow.shipment_id,
+    accountProfile, deviceSignalData,
+  };
+}
+
+// ─── SIGNAL BUILDERS (bridge DB data → mock-compatible format) ────────────────
+
+function _buildAccountSignal(booking, dbProfile) {
+  if (dbProfile) {
+    return {
+      shipper_id: booking.shipper_id,
+      account_status: dbProfile.status || 'ACTIVE',
+      account_tier: dbProfile.account_type || 'BUSINESS',
+      account_age_days: dbProfile.opened_at
+        ? Math.floor((Date.now() - new Date(dbProfile.opened_at)) / 86400000) : 0,
+      verified: true,
+      historical_profile: {
+        total_shipments: parseInt(dbProfile.total_shipments) || 0,
+        avg_shipments_per_day: parseFloat(dbProfile.avg_daily_volume) || 0,
+        avg_weight: parseFloat(dbProfile.avg_weight_kg) || 0,
+        max_historical_weight: parseFloat(dbProfile.avg_weight_kg) * 3 || 30,
+        usual_origins: dbProfile.common_origins || [],
+        usual_destinations: dbProfile.common_destinations || [],
+        usual_service_types: Object.keys(dbProfile.service_mix || {}),
+        usual_booking_hours: dbProfile.hour_histogram
+          ? dbProfile.hour_histogram.reduce((acc, v, i) => v > 0 ? [...acc, i] : acc, [])
+          : [],
+      },
+      security: {
+        last_password_change: dbProfile.last_password_change_at,
+        last_profile_update: dbProfile.last_profile_change_at,
+        known_devices: dbProfile.known_devices || [],
+        known_payment_ids: dbProfile.known_payments || [],
+      },
+      historical_fraud: {
+        previous_fraud_cases: parseInt(dbProfile.fraud_count) || 0,
+        previous_review_cases: 0,
+      },
+    };
+  }
+  // fallback: treat as new account
+  return {
+    shipper_id: booking.shipper_id,
+    account_status: 'ACTIVE',
+    account_tier: 'BUSINESS',
+    account_age_days: 0,
+    verified: false,
+    historical_profile: {
+      total_shipments: 0, avg_shipments_per_day: 0, avg_weight: 0,
+      max_historical_weight: 0, usual_origins: [], usual_destinations: [],
+      usual_service_types: [], usual_booking_hours: [],
+    },
+    security: {
+      last_password_change: null, last_profile_update: null,
+      known_devices: [], known_payment_ids: [],
+    },
+    historical_fraud: { previous_fraud_cases: 0, previous_review_cases: 0 },
+  };
+}
+
+function _buildPaymentSignal(booking, paymentRow) {
+  if (!booking.payment_id) return null;
+  const isNew = paymentRow && new Date(paymentRow.first_seen_at) > new Date(Date.now() - 3600000);
+  return {
+    payment_id: booking.payment_id,
+    payment_type: 'CREDIT_CARD',
+    status: 'ACTIVE',
+    card: { last4: null, issuer_country: 'IN', cardholder_name: null, cardholder_match: true },
+    history: {
+      first_seen: paymentRow?.first_seen_at || new Date().toISOString(),
+      previous_transactions: 0,
+      previous_shipments: 0,
+      amount_spend_30d: 0,
+    },
+    risk: {
+      new_payment_method: isNew !== false,
+      billing_shipping_match: true,
+      previous_fraud_count: paymentRow?.is_flagged ? 1 : 0,
+    },
+  };
+}
+
+function _buildDeviceSignal(booking, deviceRow, signalData) {
+  if (!deviceRow) {
+    return {
+      device_id: booking.device_id || 'unknown',
+      device: { status: 'UNKNOWN', first_seen: new Date().toISOString(), known_device: false, accounts_linked: 0 },
+      ip: { address: booking.ip_address, country: 'UNKNOWN', reputation: 'UNKNOWN', vpn_detected: false, proxy_detected: false },
+      fraud_signals: { device_blacklisted: false, ip_blacklisted: false, device_linked_to_fraud: false, linked_fraud_accounts: [] },
+      risk_score: 40,
+    };
+  }
+  const linkedFraudAccounts = (signalData?.linked_accounts || []);
+  return {
+    device_id: booking.device_id,
+    device: {
+      status: deviceRow.is_flagged ? 'FLAGGED' : 'ACTIVE',
+      first_seen: deviceRow.first_seen_at,
+      known_device: deviceRow.linked_account_count > 0,
+      accounts_linked: deviceRow.linked_account_count || 0,
+    },
+    ip: {
+      address: booking.ip_address,
+      country: 'IN',
+      reputation: deviceRow.is_flagged ? 'SUSPICIOUS' : 'CLEAN',
+      vpn_detected: false,
+      proxy_detected: false,
+    },
+    fraud_signals: {
+      device_blacklisted: deviceRow.is_flagged || false,
+      ip_blacklisted: false,
+      device_linked_to_fraud: signalData?.signals?.length > 0 || false,
+      linked_fraud_accounts: linkedFraudAccounts,
+    },
+    risk_score: deviceRow.is_flagged ? 80 : linkedFraudAccounts.length > 0 ? 60 : 10,
+  };
+}
+
+function _buildAddressSignal(booking, addrRow) {
+  const city = booking.destination || 'Unknown';
+  const score = addrRow?.confidence_score != null ? addrRow.confidence_score / 100 : 0.7;
+  return {
+    location: city,
+    address_valid: true,
+    confidence_score: score,
+    risk_tier: score >= 0.8 ? 'LOW' : score >= 0.5 ? 'MEDIUM' : 'HIGH',
+    signals: [],
+  };
+}
+
+// ─── RISK PIPELINE FUNCTIONS ──────────────────────────────────────────────────
+
+function aggregateRisk(ruleResult, mlResult, deviceSignals, features) {
   const ruleComponent = ruleResult.rule_score * WEIGHTS.rules;
   const mlComponent = mlResult.ml_score * WEIGHTS.ml;
   const graphComponent = (deviceSignals?.risk_score || 0) * WEIGHTS.graph;
 
   let riskScore = ruleComponent + mlComponent + graphComponent;
 
-  // Apply floor/ceiling adjustments for critical signals
-  // These override the weighted average to prevent false negatives
-  if (features.identity.is_suspended) {
-    riskScore = Math.max(riskScore, 85);
-  }
-  if (features.device.device_blacklisted || features.device.ip_blacklisted) {
-    riskScore = Math.max(riskScore, 80);
-  }
-  if (features.identity.previous_fraud_cases >= 3) {
-    riskScore = Math.max(riskScore, 90);
-  }
+  if (features.identity?.is_suspended) riskScore = Math.max(riskScore, 85);
+  if (features.device?.device_blacklisted || features.device?.ip_blacklisted) riskScore = Math.max(riskScore, 80);
+  if (features.identity?.previous_fraud_cases >= 3) riskScore = Math.max(riskScore, 90);
 
   riskScore = Math.round(Math.min(100, Math.max(0, riskScore)));
-
-  const riskLevel = getRiskLevel(riskScore);
-
-  return { risk_score: riskScore, risk_level: riskLevel };
+  return { risk_score: riskScore, risk_level: getRiskLevel(riskScore) };
 }
 
-
-/**
- * Map risk score to risk level using configurable thresholds.
- *
- * 0 ───────── 30 ───────── 50 ───────── 70 ───────── 85 ───────── 100
- *      LOW         MEDIUM       MEDIUM-HIGH      HIGH         CRITICAL
- */
 function getRiskLevel(score) {
   const t = decisionThresholds;
   if (score <= t.allow_max)   return 'LOW';
@@ -199,83 +415,33 @@ function getRiskLevel(score) {
   return 'CRITICAL';
 }
 
-
-/**
- * Decision Engine — maps risk level to an action.
- *
- * LOW      → ALLOW          (no friction)
- * MEDIUM   → ALLOW_MONITOR  (allow but flag for pattern analysis)
- * HIGH     → VERIFY         (request step-up verification from account owner)
- * HIGH     → REVIEW         (hold for fraud analyst review)
- * CRITICAL → BLOCK          (block shipment)
- */
-function makeDecision(riskScore, riskLevel) {
+function makeDecision(riskScore) {
   const t = decisionThresholds;
-
-  if (riskScore <= t.allow_max) {
-    return { action: 'ALLOW', reason: 'Risk score within acceptable range' };
-  }
-  if (riskScore <= t.monitor_max) {
-    return { action: 'ALLOW_MONITOR', reason: 'Low-moderate risk — allow but monitor for patterns' };
-  }
-  if (riskScore <= t.verify_max) {
-    return { action: 'VERIFY', reason: 'Moderate risk — request step-up verification from account owner' };
-  }
-  if (riskScore <= t.review_max) {
-    return { action: 'REVIEW', reason: 'High risk — hold for fraud analyst review' };
-  }
+  if (riskScore <= t.allow_max)   return { action: 'ALLOW', reason: 'Risk score within acceptable range' };
+  if (riskScore <= t.monitor_max) return { action: 'ALLOW_MONITOR', reason: 'Low-moderate risk — allow but monitor' };
+  if (riskScore <= t.verify_max)  return { action: 'VERIFY', reason: 'Moderate risk — request step-up verification' };
+  if (riskScore <= t.review_max)  return { action: 'REVIEW', reason: 'High risk — hold for fraud analyst review' };
   return { action: 'BLOCK', reason: 'Critical risk — multiple high-risk signals detected' };
 }
 
-
-/**
- * Generate human-readable top reasons for the fraud assessment.
- * Sorted by risk contribution (highest first), limited to top 5.
- */
 function generateTopReasons(ruleResult, mlResult, features) {
-  const reasons = [];
-
-  // Add triggered rule descriptions (sorted by risk_points descending)
-  const sortedRules = [...ruleResult.triggered_rules]
-    .filter(r => r.risk_points > 0)  // only suspicious signals, not mitigating
-    .sort((a, b) => b.risk_points - a.risk_points);
-
-  for (const rule of sortedRules) {
-    reasons.push(rule.description);
-  }
-
-  // Deduplicate and limit to top 5
-  const uniqueReasons = [...new Set(reasons)];
-  return uniqueReasons.slice(0, 5);
+  const reasons = [...ruleResult.triggered_rules]
+    .filter(r => r.risk_points > 0)
+    .sort((a, b) => b.risk_points - a.risk_points)
+    .map(r => r.description);
+  return [...new Set(reasons)].slice(0, 5);
 }
 
-
-/**
- * Compute signal contribution breakdown by category.
- * Shows how much each category contributed to the total risk score.
- */
 function computeSignalBreakdown(ruleResult, mlResult) {
+  const cats = ruleResult.category_breakdown;
+  const map = { BEHAVIOR: 'behavioral', IDENTITY: 'identity', PAYMENT: 'payment', DEVICE: 'device', ADDRESS: 'address', VELOCITY: 'velocity' };
   const breakdown = {};
-  const categories = ruleResult.category_breakdown;
-
-  // Map rule categories to the response format
-  const categoryMap = {
-    BEHAVIOR: 'behavioral',
-    IDENTITY: 'identity',
-    PAYMENT: 'payment',
-    DEVICE: 'device',
-    ADDRESS: 'address',
-    VELOCITY: 'velocity',
-  };
-
-  for (const [cat, label] of Object.entries(categoryMap)) {
-    const ruleContribution = categories[cat]?.points || 0;
-    const mlContribution = mlResult.feature_importances[label] || 0;
-    breakdown[label] = Math.max(0, Math.round(ruleContribution + mlContribution));
+  for (const [cat, label] of Object.entries(map)) {
+    const rc = cats[cat]?.points || 0;
+    const mc = mlResult.feature_importances?.[label] || 0;
+    breakdown[label] = Math.max(0, Math.round(rc + mc));
   }
-
   return breakdown;
 }
-
 
 module.exports = { screenShipment };

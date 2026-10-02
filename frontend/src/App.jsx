@@ -5,9 +5,8 @@ import Dashboard from './pages/Dashboard';
 
 import Screening from './pages/Screening';
 import Investigation from './pages/Investigation';
-
-// Placeholder components for subsequent phase
-const FraudGraph = () => <div className="p-8 text-center text-secondary">Fraud Graph Page (Phase 5)</div>;
+import FraudGraph from './pages/FraudGraph';
+import Simulator from './pages/Simulator';
 
 function App() {
   return (
@@ -21,6 +20,7 @@ function App() {
             <Route path="/investigation" element={<Investigation />} />
             <Route path="/investigation/:id" element={<Investigation />} />
             <Route path="/graph" element={<FraudGraph />} />
+            <Route path="/simulator" element={<Simulator />} />
           </Routes>
         </main>
       </div>

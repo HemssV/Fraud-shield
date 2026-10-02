@@ -61,8 +61,12 @@ export const api = {
   },
 
   // ─── FRAUD GRAPH (DJANGO) ───────────────────────────────────────────────────
-  getFraudGraph: async (shipperId) => {
-    const response = await djangoClient.get(`/fraud-graph/account/${shipperId}/`);
+  getFraudGraph: async (accountId) => {
+    const response = await djangoClient.get(`/fraud-graph/account/${accountId}/`);
+    return response.data;
+  },
+  detectFraudRings: async (minSharedEntities = 1) => {
+    const response = await djangoClient.post('/fraud-graph/detect-rings/', { min_shared_entities: minSharedEntities });
     return response.data;
   },
 
@@ -78,3 +82,4 @@ export const api = {
     return response.data;
   }
 };
+

@@ -1,0 +1,79 @@
+// ml/integration/fraudModel.js.new
+// Replacement for src/ml/fraudModel.js
+// Calls the Python ML Service instead of returning mock logic.
+
+const axios = require('axios');
+const logger = require('../utils/logger');
+
+// ORIGINAL MOCK LOGIC - kept for fallback
+function scoreShipmentMock(features) {
+  let score = 0;
+  
+  if (features.behavioral?.weight_z_score > 2) score += 6;
+  if (features.behavioral?.is_new_destination) score += 5;
+  if (features.identity?.is_suspended) score += 20;
+  if (features.payment?.is_new_payment_method) score += 7;
+  if (features.device?.device_blacklisted) score += 18;
+
+  const fraudProbability = Math.min(1.0, Math.max(0.0, score / 100));
+
+  return {
+    fraud_probability: Math.round(fraudProbability * 10000) / 10000,
+    ml_score: Math.round(score * 100) / 100,
+    feature_importances: { behavioral: 10, identity: 10, payment: 10, device: 10, address: 10 },
+    model_version: 'fraud-xgb-v1-mock',
+    scoring_ms: 1,
+  };
+}
+
+/**
+ * Score a shipment using the ML Microservice.
+ * Falls back to local mock on ANY failure to maintain system uptime.
+ *
+ * @param {object} features - Engineered features from the Feature Generator
+ * @param {string} shipment_id - The ID of the shipment (optional, for logging)
+ * @returns {Promise<object>} ML scoring result
+ */
+async function scoreShipment(features, shipment_id = 'unknown') {
+  const startTime = Date.now();
+  const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://localhost:8001';
+  const isMockMode = process.env.ML_MOCK_MODE === 'true';
+
+  if (isMockMode) {
+    logger.debug('ML Service in mock mode (env flag)');
+    return scoreShipmentMock(features);
+  }
+
+  try {
+    const response = await axios.post(`${mlServiceUrl}/score`, {
+      shipment_id,
+      features
+    }, {
+      timeout: 2000 // Strict 2 second timeout
+    });
+
+    const result = response.data;
+    // Map response to expected shape
+    return {
+      fraud_probability: result.fraud_probability,
+      ml_score: result.ml_score,
+      feature_importances: result.feature_importances || {},
+      model_version: result.model_version || 'unknown',
+      scoring_ms: Date.now() - startTime
+    };
+
+  } catch (error) {
+    logger.warn('ML Service failed or timed out, falling back to mock engine', {
+      error: error.message,
+      shipment_id
+    });
+    
+    // Graceful degradation
+    const fallback = scoreShipmentMock(features);
+    fallback.scoring_ms = Date.now() - startTime;
+    fallback.model_version += '-fallback';
+    return fallback;
+  }
+}
+
+module.exports = { scoreShipment };

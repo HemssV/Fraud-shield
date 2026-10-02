@@ -1,0 +1,74 @@
+{
+  "behavioral": {
+    "weight_z_score": 0.0,
+    "weight_ratio_to_avg": 1.0,
+    "weight_exceeds_max": false,
+    "is_unusual_hour": false,
+    "booking_hour": 12,
+    "is_new_destination": false,
+    "is_new_origin": false,
+    "is_unusual_service": false,
+    "package_count_ratio": 1.0,
+    "total_historical_shipments": 0,
+    "is_low_history": true
+  },
+  "identity": {
+    "is_new_device": false,
+    "is_new_payment_for_account": false,
+    "password_changed_recently": false,
+    "profile_updated_recently": false,
+    "account_age_days": 0,
+    "is_new_account": false,
+    "account_status": "UNKNOWN",
+    "is_suspended": false,
+    "is_under_investigation": false,
+    "is_verified": true,
+    "previous_fraud_cases": 0,
+    "previous_review_cases": 0
+  },
+  "payment": {
+    "payment_found": false,
+    "is_new_payment_method": true,
+    "cardholder_match": false,
+    "billing_shipping_match": false,
+    "previous_transactions": 0,
+    "previous_shipments": 0,
+    "amount_spend_30d": 0.0,
+    "previous_fraud_count": 0,
+    "foreign_card": false,
+    "payment_type": "UNKNOWN"
+  },
+  "device": {
+    "device_found": false,
+    "known_device": false,
+    "known_for_this_account": false,
+    "accounts_linked": 0,
+    "device_risk_score": 40,
+    "ip_country": "UNKNOWN",
+    "ip_reputation": "UNKNOWN",
+    "vpn_detected": false,
+    "proxy_detected": false,
+    "device_blacklisted": false,
+    "ip_blacklisted": false,
+    "device_linked_to_fraud": false,
+    "linked_fraud_account_count": 0,
+    "linked_fraud_accounts": []
+  },
+  "address": {
+    "address_found": false,
+    "address_valid": false,
+    "confidence_score": 0.3,
+    "risk_tier": "HIGH",
+    "is_new_destination_for_shipper": true,
+    "delivery_success_rate": 0.0,
+    "signals": []
+  },
+  "velocity": {
+    "booking_hour": 12,
+    "is_late_night": false,
+    "is_weekend": false,
+    "avg_daily_volume": 0.0,
+    "estimated_daily_rate": 1,
+    "volume_spike_detected": false
+  }
+}

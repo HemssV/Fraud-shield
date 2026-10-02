@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-bg: #000000;
+  --color-brand-primary: #FDE047; /* Bright gold for text/icons */
+  --color-brand-secondary: #A1A1AA; /* Muted gray for secondary text */
+  --color-brand-button: #EAB308; /* Rich gold for buttons */
+  
+  --color-risk-critical: #EF4444;
+  --color-risk-high: #F97316;
+  --color-risk-medium: #F59E0B;
+  --color-risk-low: #22C55E;
+  
+  --color-brand-text-dark: #000000;
+}
+
+body {
+  background-color: var(--color-brand-bg);
+  color: var(--color-brand-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(15, 15, 15, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(234, 179, 8, 0.15); /* Subtle gold border */
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+}
+
+.glass-table-row {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Base text */
+.text-primary { color: var(--color-brand-primary); }
+.text-secondary { color: var(--color-brand-secondary); }
+.border-secondary { border-color: rgba(234, 179, 8, 0.2); }
+
+/* Buttons */
+.btn-primary {
+  background-color: var(--color-brand-button);
+  color: var(--color-brand-text-dark);
+  font-weight: 600;
+  transition: all 0.2s;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.2);
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  background-color: #FDE047;
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.4);
+}
+
+/* Utilities */
+.tabular-nums { font-variant-numeric: tabular-nums; }

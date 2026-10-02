@@ -43,8 +43,8 @@ export const api = {
   },
 
   // ─── INVESTIGATIONS & CASES (DJANGO) ────────────────────────────────────────
-  getInvestigations: async () => {
-    const response = await djangoClient.get('/cases/');
+  getInvestigations: async (params = {}) => {
+    const response = await djangoClient.get('/cases/', { params });
     return response.data;
   },
   getInvestigationDetail: async (id) => {
@@ -55,6 +55,10 @@ export const api = {
     const response = await djangoClient.post(`/cases/${id}/decision/`, data);
     return response.data;
   },
+  assignCase: async (id, staffUserId) => {
+    const response = await djangoClient.post(`/cases/${id}/assign/`, { staff_user_id: staffUserId });
+    return response.data;
+  },
 
   // ─── FRAUD GRAPH (DJANGO) ───────────────────────────────────────────────────
   getFraudGraph: async (shipperId) => {
@@ -63,8 +67,8 @@ export const api = {
   },
 
   // ─── GENAI EXPLANATION (DJANGO) ─────────────────────────────────────────────
-  getFraudExplanation: async (shipmentId) => {
-    const response = await djangoClient.post('/fraud/explain/', { shipment_id: shipmentId });
+  getFraudExplanation: async (assessmentId) => {
+    const response = await djangoClient.post('/fraud/explain/', { assessment_id: assessmentId });
     return response.data;
   },
 

@@ -95,10 +95,35 @@ def get_case_detail(case_id: str) -> dict[str, Any]:
     Return the full investigation bundle for a case:
       shipment, assessment, reasons, decision, graph, GenAI explanation, audit.
     """
-    case = FraudCase.objects.select_related(
-        'shipment', 'shipment__account', 'shipment__device',
-        'shipment__payment', 'assessment', 'assigned_to'
-    ).get(case_id=case_id)
+    case = None
+    try:
+        uuid.UUID(str(case_id))
+        case = FraudCase.objects.select_related(
+            'shipment', 'shipment__account', 'shipment__device',
+            'shipment__payment', 'assessment', 'assigned_to'
+        ).filter(case_id=case_id).first()
+    except (ValueError, TypeError):
+        pass
+
+    if not case:
+        case = FraudCase.objects.select_related(
+            'shipment', 'shipment__account', 'shipment__device',
+            'shipment__payment', 'assessment', 'assigned_to'
+        ).filter(shipment__booking_ref=case_id).first()
+
+    if not case:
+        shipment_obj = Shipment.objects.filter(booking_ref=case_id).first()
+        if shipment_obj:
+            assessment_obj = RiskAssessment.objects.filter(shipment=shipment_obj).order_by('-assessed_at').first()
+            if assessment_obj:
+                case = open_case_for_assessment(assessment_obj)
+                case = FraudCase.objects.select_related(
+                    'shipment', 'shipment__account', 'shipment__device',
+                    'shipment__payment', 'assessment', 'assigned_to'
+                ).filter(case_id=case.case_id).first()
+
+    if not case:
+        raise FraudCase.DoesNotExist(f"Fraud case '{case_id}' not found.")
 
     assessment = case.assessment
     shipment = case.shipment

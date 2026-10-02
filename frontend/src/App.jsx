@@ -3,9 +3,10 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 
-// Placeholder components for other phases
-const Screening = () => <div className="p-8 text-center text-secondary">Screening Page (Phase 3)</div>;
-const Investigation = () => <div className="p-8 text-center text-secondary">Investigation Page (Phase 4)</div>;
+import Screening from './pages/Screening';
+import Investigation from './pages/Investigation';
+
+// Placeholder components for subsequent phase
 const FraudGraph = () => <div className="p-8 text-center text-secondary">Fraud Graph Page (Phase 5)</div>;
 
 function App() {

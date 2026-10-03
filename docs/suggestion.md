@@ -8,6 +8,7 @@ The system moves conceptually from:
 > "This behavior is **unfamiliar** for this shipper"
 
 to:
+
 > "This behavior has become **familiar** for this shipper"
 
 …without ever reaching:

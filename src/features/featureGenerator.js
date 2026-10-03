@@ -119,6 +119,35 @@ function generateBehavioralFeatures(booking, account) {
     }
   }
 
+  // 1.3 Route entropy
+  const routeCounts = profile.route_counts || {};
+  const currentRoute = `${booking.origin}-${booking.destination}`;
+  let route_entropy = 0;
+  let is_new_route = true;
+  let route_count = 0;
+  
+  const numRoutes = Object.keys(routeCounts).length;
+  if (numRoutes > 0) {
+    let totalCount = 0;
+    for (const count of Object.values(routeCounts)) {
+      totalCount += count;
+    }
+    if (totalCount > 0) {
+      for (const count of Object.values(routeCounts)) {
+        if (count > 0) {
+          const p = count / totalCount;
+          route_entropy -= p * Math.log2(p);
+        }
+      }
+      const maxEntropy = Math.log2(numRoutes);
+      if (maxEntropy > 0 && route_entropy > maxEntropy) {
+        route_entropy = maxEntropy;
+      }
+      route_count = routeCounts[currentRoute] || 0;
+      is_new_route = route_count === 0;
+    }
+  }
+
   return {
     weight_z_score: Math.round(weightZScore * 100) / 100,
     weight_ratio_to_avg: Math.round(weightRatio * 100) / 100,
@@ -133,6 +162,9 @@ function generateBehavioralFeatures(booking, account) {
     is_low_history: (profile.total_shipments || 0) < 10,
     days_until_departure,
     departure_in_past,
+    route_entropy: Math.round(route_entropy * 100) / 100,
+    is_new_route,
+    route_count,
   };
 }
 

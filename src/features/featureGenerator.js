@@ -55,6 +55,11 @@ function generateFeatures(booking, account, payment, deviceSignals, addressData,
     return sum + Object.keys(features[cat]).length;
   }, 0);
 
+  // Validate strict canonical ordering and flatten
+  const { flattenFeatures, get1DVector } = require('./featureSchema');
+  const flatObj = flattenFeatures(features);
+  features._flat_vector = get1DVector(features);
+
   logger.debug('Features generated', {
     shipment: booking.shipper_id,
     count: features._meta.feature_count,

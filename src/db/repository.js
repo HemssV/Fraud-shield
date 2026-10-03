@@ -381,32 +381,40 @@ async function upsertShipperProfile(account_id) {
   // Compute stats from last 90 days of real shipments
   const { rows } = await db.query(
     `SELECT
-       COUNT(*) AS total,
-       AVG(weight_kg) AS avg_weight,
-       STDDEV(weight_kg) AS std_weight,
-       COUNT(*) / 90.0 AS avg_daily
-     FROM shipments
-     WHERE account_id = $1 AND booked_at >= now() - interval '90 days'
-       AND status NOT IN ('BLOCKED','CANCELLED')`,
+       COUNT(s.shipment_id) AS total,
+       AVG(s.weight_kg) AS avg_weight,
+       STDDEV(s.weight_kg) AS std_weight,
+       COUNT(s.shipment_id) / 90.0 AS avg_daily,
+       ARRAY_AGG(DISTINCT dest.city) FILTER (WHERE dest.city IS NOT NULL) AS common_dests,
+       ARRAY_AGG(DISTINCT orig.city) FILTER (WHERE orig.city IS NOT NULL) AS common_origins
+     FROM shipments s
+     LEFT JOIN addresses dest ON s.dest_address_id = dest.address_id
+     LEFT JOIN addresses orig ON s.origin_address_id = orig.address_id
+     WHERE s.account_id = $1 AND s.booked_at >= now() - interval '90 days'
+       AND s.status NOT IN ('BLOCKED','CANCELLED')`,
     [account_id]
   );
-  const stats = rows[0];
+  const stats = rows[0] || {};
 
   await db.query(
     `INSERT INTO shipper_profiles
-       (account_id, total_shipments, avg_daily_volume, avg_weight_kg, std_weight_kg)
-     VALUES ($1,$2,$3,$4,$5)
+       (account_id, total_shipments, avg_daily_volume, avg_weight_kg, std_weight_kg, common_destinations, common_origins)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (account_id) DO UPDATE
        SET total_shipments = EXCLUDED.total_shipments,
            avg_daily_volume = EXCLUDED.avg_daily_volume,
            avg_weight_kg = EXCLUDED.avg_weight_kg,
            std_weight_kg = EXCLUDED.std_weight_kg,
+           common_destinations = EXCLUDED.common_destinations,
+           common_origins = EXCLUDED.common_origins,
            updated_at = now()`,
     [account_id,
      parseInt(stats.total) || 0,
      parseFloat(stats.avg_daily) || 0,
      parseFloat(stats.avg_weight) || 0,
-     parseFloat(stats.std_weight) || 0]
+     parseFloat(stats.std_weight) || 0,
+     stats.common_dests || [],
+     stats.common_origins || []]
   );
 }
 

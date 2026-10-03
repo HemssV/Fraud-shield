@@ -615,11 +615,6 @@ export default function Investigation() {
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white">AI Fraud Copilot Brief</h3>
-                    <span className="text-[10px] text-[#38BDF8] font-mono">
-                      {aiExplanation?.llm_model && !aiExplanation.llm_model.startsWith('mock')
-                        ? aiExplanation.llm_model
-                        : 'Gemini 3.8 Flash'}
-                    </span>
                   </div>
                 </div>
 

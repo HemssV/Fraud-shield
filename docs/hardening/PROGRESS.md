@@ -1,0 +1,64 @@
+# Hardening Progress
+
+## PHASE 0: AUDIT
+- [ ] 0.1 Audit codebase and create AUDIT.md (Status: BLOCKED / NOT STARTED)
+
+## PHASE 1: CORRECTNESS BUGS
+- [ ] 1.1 Null safety (Status: NOT STARTED)
+- [ ] 1.2 Time math (Status: NOT STARTED)
+- [ ] 1.3 Route entropy (Status: NOT STARTED)
+- [ ] 1.4 Velocity z-scores (Status: NOT STARTED)
+- [ ] 1.5 Feature bounds and clipping (Status: NOT STARTED)
+- [ ] 1.6 Canonical feature order (Status: NOT STARTED)
+- [ ] 1.7 Score combination (Status: NOT STARTED)
+- [ ] 1.8 Duplicate/concurrent scoring (Status: NOT STARTED)
+
+## PHASE 2: INPUT VALIDATION
+- [ ] 2.1 Shared validator schema (Status: NOT STARTED)
+- [ ] 2.2 Past departure dates (Status: NOT STARTED)
+- [ ] 2.3 Structured errors (Status: NOT STARTED)
+
+## PHASE 3: DATABASE AND INFRASTRUCTURE
+- [ ] 3.1 Pool config (Status: NOT STARTED)
+- [ ] 3.2 Audit log migration (Status: NOT STARTED)
+- [ ] 3.3 Health/ready checks (Status: NOT STARTED)
+- [ ] 3.4 Security basics (Status: NOT STARTED)
+- [ ] 3.5 Structured logging (Status: NOT STARTED)
+
+## PHASE 4: ML SERVICE AND TRAINING
+- [ ] 4.1 Synthetic training data (Status: NOT STARTED)
+- [ ] 4.2 Train-serve parity script (Status: NOT STARTED)
+- [ ] 4.3 metadata.json updates (Status: NOT STARTED)
+- [ ] 4.4 Model bounding (Status: NOT STARTED)
+
+## PHASE 5: ADAPTIVE BEHAVIORAL PROFILING
+- [ ] 5.1 Profile max age limit (Status: NOT STARTED)
+- [ ] 5.2 Familiar discount conditions (Status: NOT STARTED)
+- [ ] 5.3 CONFIRMED_FRAUD handling and retrain script (Status: NOT STARTED)
+
+## PHASE 6: RULES ENGINE
+- [ ] 6.1 Move rules to constants (Status: NOT STARTED)
+- [ ] 6.2 Unit tests for rules (Status: NOT STARTED)
+- [ ] 6.3 Validations for rules builder (Status: NOT STARTED)
+
+## PHASE 7: CSV UPLOAD AND DEMO BUTTONS
+- [ ] 7.1 Backend CSV parsing (Status: NOT STARTED)
+- [ ] 7.2 Entity creation on DEMO (Status: NOT STARTED)
+- [ ] 7.3 Demo CSV generator (Status: NOT STARTED)
+- [ ] 7.4 Frontend CSV UI (Status: NOT STARTED)
+- [ ] 7.5 Dashboard stats (Status: NOT STARTED)
+
+## PHASE 8: TESTS AND VALIDATION
+- [ ] 8.1 Automated tests (Status: NOT STARTED)
+- [ ] 8.2 validate_pipeline.js script (Status: NOT STARTED)
+- [ ] 8.3 npm run scripts (Status: NOT STARTED)
+
+## PHASE 9: DOCUMENTATION
+- [ ] 9.1 README.md (Status: NOT STARTED)
+- [ ] 9.2 CHANGES.md (Status: NOT STARTED)
+- [ ] 9.3 DECISIONS.md (Status: NOT STARTED)
+- [ ] 9.4 Assorted docs (Status: NOT STARTED)
+- [ ] 9.5 KNOWN_LIMITATIONS.md (Status: NOT STARTED)
+
+## DECISIONS LOG
+- No decisions yet.

@@ -228,10 +228,6 @@ export default function FraudGraph() {
       {/* Header bar */}
       <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[rgba(234,179,8,0.15)]">
         <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-[rgba(234,179,8,0.1)] text-[#FDE047] border border-[rgba(234,179,8,0.25)] mb-2">
-            <Network size={13} />
-            <span>Phase 5 Feature: NetworkX Entity Relationship Graph</span>
-          </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
             <span>Fraud Graph Intelligence</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full border border-sky-500/30 bg-sky-500/10 text-sky-400 font-bold uppercase">
@@ -583,7 +579,7 @@ export default function FraudGraph() {
                     to="/investigation"
                     className="w-full btn-primary py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-[0_0_10px_rgba(234,179,8,0.2)]"
                   >
-                    <span>Investigate in Phase 4</span>
+                    <span>Investigate Case</span>
                     <ArrowRight size={14} />
                   </Link>
                   <button

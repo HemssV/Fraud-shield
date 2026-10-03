@@ -150,10 +150,6 @@ export default function Simulator() {
       {/* Header bar */}
       <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[rgba(234,179,8,0.15)]">
         <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-[rgba(234,179,8,0.1)] text-[#FDE047] border border-[rgba(234,179,8,0.25)] mb-2">
-            <Zap size={13} />
-            <span>Phase 6 Feature: Real-Time Scenario Simulator</span>
-          </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
             <span>Fraud Scenario Simulator</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 font-bold uppercase">
@@ -371,7 +367,7 @@ export default function Simulator() {
                     to={`/investigation/${simResult.booking_ref || simResult.shipment_id}`}
                     className="w-full btn-primary py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(234,179,8,0.3)] transition-all"
                   >
-                    <span>Investigate Simulated Case in Phase 4</span>
+                    <span>Investigate Simulated Case</span>
                     <ArrowRight size={14} />
                   </Link>
                 </div>

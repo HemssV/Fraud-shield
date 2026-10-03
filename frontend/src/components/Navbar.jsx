@@ -7,11 +7,11 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   const navItems = [
-    { name: 'Dashboard', phase: 'Phase 2', path: '/', icon: <Activity size={18} /> },
-    { name: 'Screening', phase: 'Phase 3', path: '/screening', icon: <Search size={18} /> },
-    { name: 'Investigation', phase: 'Phase 4', path: '/investigation', icon: <Target size={18} /> },
-    { name: 'Fraud Graph', phase: 'Phase 5', path: '/graph', icon: <Network size={18} /> },
-    { name: 'Simulator', phase: 'Phase 6', path: '/simulator', icon: <Zap size={18} /> },
+    { name: 'Dashboard', path: '/', icon: <Activity size={18} /> },
+    { name: 'Screening', path: '/screening', icon: <Search size={18} /> },
+    { name: 'Investigation', path: '/investigation', icon: <Target size={18} /> },
+    { name: 'Fraud Graph', path: '/graph', icon: <Network size={18} /> },
+    { name: 'Simulator', path: '/simulator', icon: <Zap size={18} /> },
   ];
 
   return (
@@ -40,13 +40,6 @@ export default function Navbar() {
                     >
                       {item.icon}
                       <span>{item.name}</span>
-                      <span className={`text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded ${
-                        isActive 
-                          ? 'bg-[#EAB308] text-black' 
-                          : 'bg-zinc-800 text-zinc-400'
-                      }`}>
-                        {item.phase}
-                      </span>
                     </Link>
                   );
                 })}
@@ -55,10 +48,6 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.25)]">
-              <div className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
-              <span className="text-xs font-medium text-emerald-400">All Engines Active (Phases 1-6)</span>
-            </div>
 
             {/* Mobile Hamburger Button */}
             <div className="lg:hidden">

@@ -769,42 +769,6 @@ export default function Screening() {
               <div className="w-16 h-16 rounded-2xl bg-[rgba(234,179,8,0.08)] border border-[rgba(234,179,8,0.2)] flex items-center justify-center text-[#EAB308] mb-4 shadow-[0_0_25px_rgba(234,179,8,0.15)]">
                 <ShieldCheck size={32} />
               </div>
-              <h3 className="text-lg font-bold text-white">Real-Time Ingestion & Fraud Screening Console</h3>
-              <p className="text-xs text-secondary max-w-md mt-2 leading-relaxed">
-                This console ingests new shipment bookings directly into the live database registry. Every execution extracts real-time entity features, triggers rule heuristics, runs ML inference, and immediately creates a fraud audit record.
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full max-w-md mt-6 text-left">
-                <div className="p-3 rounded-lg bg-black/40 border border-white/5">
-                  <div className="text-[10px] text-zinc-500 font-mono">01. INGEST</div>
-                  <div className="text-xs font-semibold text-zinc-200 mt-0.5">Persist Booking</div>
-                </div>
-                <div className="p-3 rounded-lg bg-black/40 border border-white/5">
-                  <div className="text-[10px] text-zinc-500 font-mono">02. EVALUATE</div>
-                  <div className="text-xs font-semibold text-zinc-200 mt-0.5">Rules & ML Scoring</div>
-                </div>
-                <div className="p-3 rounded-lg bg-black/40 border border-white/5">
-                  <div className="text-[10px] text-zinc-500 font-mono">03. DISPATCH</div>
-                  <div className="text-xs font-semibold text-zinc-200 mt-0.5">Case & Policy Action</div>
-                </div>
-              </div>
-              
-              <div className="mt-6 flex flex-wrap gap-2 justify-center">
-                <button
-                  type="button"
-                  onClick={() => loadPreset(PRESETS[0])}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[rgba(34,197,94,0.1)] text-[#22C55E] border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors cursor-pointer"
-                >
-                  Load Clean Baseline Preset &rarr;
-                </button>
-                <button
-                  type="button"
-                  onClick={() => loadPreset(PRESETS[1])}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[rgba(234,179,8,0.1)] text-[#FDE047] border border-[rgba(234,179,8,0.3)] hover:bg-[rgba(234,179,8,0.2)] transition-colors cursor-pointer"
-                >
-                  Load Suspicious Route Preset &rarr;
-                </button>
-              </div>
             </div>
           )}
         </div>

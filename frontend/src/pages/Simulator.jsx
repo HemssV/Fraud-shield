@@ -161,7 +161,28 @@ export default function Simulator() {
           </p>
         </div>
 
-        <div>
+        <div className="flex items-center gap-3">
+          <label className="btn-secondary px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800">
+            <input type="file" accept=".csv" className="hidden" onChange={async (e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+              const formData = new FormData();
+              formData.append('file', file);
+              try {
+                alert('Uploading CSV for batch simulation...');
+                const res = await fetch('http://localhost:3000/api/demo/upload', {
+                  method: 'POST',
+                  body: formData
+                });
+                const data = await res.json();
+                alert(`Batch complete! Processed ${data.stats.total} rows.\nCritical: ${data.stats.critical}\nHigh: ${data.stats.high}\nMedium: ${data.stats.medium}\nLow: ${data.stats.low}`);
+              } catch (err) {
+                alert('Upload failed: ' + err.message);
+              }
+            }} />
+            <Database size={15} />
+            <span>Batch CSV Upload</span>
+          </label>
           <button
             type="button"
             disabled={isRunning}

@@ -34,6 +34,7 @@ const addressRoutes = require('./api/addressConfidence');
 const fraudScreenRoutes = require('./api/fraudScreen');
 const rulesRoutes = require('./api/rules');
 const riskRoutes = require('./api/risk');
+const demoRoutes = require('./api/demo');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -80,6 +81,9 @@ app.use('/api/fraud/screen', fraudScreenRoutes);
 // ⭐ New: standalone rule engine & risk calculator
 app.use('/api/rules/evaluate', rulesRoutes);
 app.use('/api/risk/calculate', riskRoutes);
+
+// Demo route
+app.use('/api/demo', demoRoutes);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────
 app.use((req, res) => {

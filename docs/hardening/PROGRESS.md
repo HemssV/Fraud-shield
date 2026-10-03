@@ -37,9 +37,9 @@
 - [x] 5.3 CONFIRMED_FRAUD handling and retrain script (Status: DONE)
 
 ## PHASE 6: RULES ENGINE
-- [ ] 6.1 Move rules to constants (Status: NOT STARTED)
-- [ ] 6.2 Unit tests for rules (Status: NOT STARTED)
-- [ ] 6.3 Validations for rules builder (Status: NOT STARTED)
+- [x] 6.1 Move rules to constants (Status: DONE)
+- [x] 6.2 Unit tests for rules (Status: DONE)
+- [x] 6.3 Validations for rules builder (Status: DONE)
 
 ## PHASE 7: CSV UPLOAD AND DEMO BUTTONS
 - [ ] 7.1 Backend CSV parsing (Status: NOT STARTED)

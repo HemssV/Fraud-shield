@@ -309,6 +309,48 @@ async function getShipmentVelocity(account_id, days = 90) {
   return rows[0];
 }
 
+/**
+ * Get entity velocity z-score (account, device, payment, ip).
+ */
+async function getEntityVelocityZScore(entity_type, entity_id) {
+  if (!entity_id) return 0;
+  
+  let column;
+  switch(entity_type) {
+    case 'ACCOUNT': column = 'account_id'; break;
+    case 'DEVICE': column = 'device_id'; break;
+    case 'PAYMENT': column = 'payment_id'; break;
+    case 'IP': column = 'ip_address'; break;
+    default: throw new Error(`Unknown entity type ${entity_type}`);
+  }
+
+  const query = `
+    SELECT
+      COUNT(*) FILTER (WHERE booked_at >= now() - interval '24 hours') AS count_last_24h,
+      COUNT(*) FILTER (WHERE booked_at >= now() - interval '30 days' AND booked_at < now() - interval '24 hours') / 29.0 AS baseline_daily
+    FROM shipments
+    WHERE ${column} = $1 AND status NOT IN ('BLOCKED','CANCELLED')
+  `;
+
+  // Explicit type cast for ip_address if needed, but parameter binding usually works.
+  // We'll cast $1 to inet if it's an IP to avoid type mismatches.
+  const actualQuery = entity_type === 'IP' ? query.replace('$1', '$1::inet') : query;
+
+  const { rows } = await db.query(actualQuery, [entity_id]);
+  const row = rows[0];
+  
+  const countLast24h = parseFloat(row.count_last_24h) || 0;
+  const baseline = parseFloat(row.baseline_daily) || 0;
+  
+  let zScore = (countLast24h - baseline) / Math.sqrt(Math.max(baseline, 0.5));
+  
+  // Clip to [-10, 10]
+  if (zScore > 10) zScore = 10;
+  if (zScore < -10) zScore = -10;
+  
+  return zScore;
+}
+
 // ─── RISK ASSESSMENTS ──────────────────────────────────────────────────────
 
 /**
@@ -486,7 +528,7 @@ module.exports = {
   // Addresses
   upsertAddress, getAddress,
   // Shipments
-  createShipment, updateShipmentStatus, getShipmentVelocity,
+  createShipment, updateShipmentStatus, getShipmentVelocity, getEntityVelocityZScore,
   // Risk pipeline
   saveRiskAssessment, saveDecision, openFraudCase,
   // Graph

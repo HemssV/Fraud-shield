@@ -20,7 +20,7 @@ const logger = require('../utils/logger');
  * @param {object} addressData - Address confidence data
  * @returns {object} Engineered feature set organized by category
  */
-function generateFeatures(booking, account, payment, deviceSignals, addressData) {
+function generateFeatures(booking, account, payment, deviceSignals, addressData, velocityZScores = {}) {
   const startTime = Date.now();
 
   const features = {
@@ -40,7 +40,7 @@ function generateFeatures(booking, account, payment, deviceSignals, addressData)
     address: generateAddressFeatures(booking, account, addressData),
 
     // ── Velocity features ──
-    velocity: generateVelocityFeatures(booking, account),
+    velocity: generateVelocityFeatures(booking, account, velocityZScores),
 
     // ── Meta ──
     _meta: {
@@ -329,12 +329,10 @@ function generateAddressFeatures(booking, account, addressData) {
 /**
  * Velocity features — timing and frequency anomalies
  */
-function generateVelocityFeatures(booking, account) {
+function generateVelocityFeatures(booking, account, velocityZScores) {
   const profile = account?.historical_profile || {};
   const avgDaily = profile.avg_shipments_per_day || 0;
 
-  // For the prototype, simulate that we've seen some recent bookings
-  // In production: query recent shipments from the database
   const bookingHour = booking.booking_timestamp
     ? new Date(booking.booking_timestamp).getUTCHours()
     : new Date().getUTCHours();
@@ -349,9 +347,14 @@ function generateVelocityFeatures(booking, account) {
     is_late_night: isLateNight,
     is_weekend: isWeekend,
     avg_daily_volume: avgDaily,
-    // In production these would be computed from recent DB queries:
-    estimated_daily_rate: (booking.package_count || 1),
-    volume_spike_detected: (booking.package_count || 1) > avgDaily * 3 && avgDaily > 0,
+    
+    // Z-scores computed natively via DB index queries
+    account_velocity_z: velocityZScores.account || 0,
+    device_velocity_z: velocityZScores.device || 0,
+    payment_velocity_z: velocityZScores.payment || 0,
+    ip_velocity_z: velocityZScores.ip || 0,
+
+    volume_spike_detected: (velocityZScores.account || 0) > 3,
   };
 }
 

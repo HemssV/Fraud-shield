@@ -7,7 +7,7 @@
 - [x] 1.1 Null safety (Status: DONE)
 - [x] 1.2 Time math (Status: DONE)
 - [x] 1.3 Route entropy (Status: DONE)
-- [ ] 1.4 Velocity z-scores (Status: NOT STARTED)
+- [x] 1.4 Velocity z-scores (Status: DONE)
 - [ ] 1.5 Feature bounds and clipping (Status: NOT STARTED)
 - [ ] 1.6 Canonical feature order (Status: NOT STARTED)
 - [ ] 1.7 Score combination (Status: NOT STARTED)

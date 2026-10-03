@@ -56,8 +56,22 @@ async function screenShipment(booking) {
   const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData);
   const addressData = _buildAddressSignal(booking, dbIds.destAddressRow);
 
+  // ─── STEP 1.5: Compute Velocity Z-scores ────────────────────────────────────
+  const zScoresArray = await Promise.all([
+    repo.getEntityVelocityZScore('ACCOUNT', dbIds.accountId),
+    repo.getEntityVelocityZScore('DEVICE', dbIds.deviceId),
+    repo.getEntityVelocityZScore('PAYMENT', dbIds.paymentId),
+    booking.ip_address ? repo.getEntityVelocityZScore('IP', booking.ip_address) : Promise.resolve(0)
+  ]);
+  const velocityZScores = {
+    account: zScoresArray[0],
+    device: zScoresArray[1],
+    payment: zScoresArray[2],
+    ip: zScoresArray[3]
+  };
+
   // ─── STEP 3: Generate engineered features ─────────────────────────────────
-  const features = generateFeatures(booking, account, payment, deviceSignals, addressData);
+  const features = generateFeatures(booking, account, payment, deviceSignals, addressData, velocityZScores);
   Object.assign(features._meta, featuresMeta);
 
   // ─── STEP 4: Run Rule Engine ───────────────────────────────────────────────

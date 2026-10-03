@@ -41,6 +41,12 @@ export const api = {
     const response = await djangoClient.get('/dashboard/review-queue/');
     return response.data;
   },
+  getRiskDistribution: async (day) => {
+    const response = await djangoClient.get('/dashboard/risk-distribution/', {
+      params: day ? { day } : {}
+    });
+    return response.data;
+  },
 
   // ─── INVESTIGATIONS & CASES (DJANGO) ────────────────────────────────────────
   getInvestigations: async (params = {}) => {

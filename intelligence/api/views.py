@@ -24,6 +24,7 @@ from intelligence.services.analytics_service import (
     get_fraud_type_distribution,
     get_recent_alerts,
     get_review_queue,
+    get_risk_distribution,
     get_summary,
 )
 from intelligence.services.audit_service import get_shipment_timeline
@@ -292,6 +293,14 @@ class DashboardFraudTypesView(APIView):
 
     def get(self, request):
         return Response(get_fraud_type_distribution())
+
+
+class DashboardRiskDistributionView(APIView):
+    """GET /api/v1/dashboard/risk-distribution/?day=YYYY-MM-DD"""
+
+    def get(self, request):
+        day = request.query_params.get('day')
+        return Response(get_risk_distribution(day=day))
 
 
 # ─── Scenario Simulator ───────────────────────────────────────────────────────

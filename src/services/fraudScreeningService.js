@@ -13,7 +13,7 @@ const repo = require('../db/repository');
 const { generateFeatures } = require('../features/featureGenerator');
 const { evaluateRules } = require('../rules/ruleEngine');
 const { scoreShipment } = require('../ml/fraudModel');
-const { decisionThresholds } = require('./mockData');
+const { decisionThresholds, accounts: mockAccounts, payments: mockPayments } = require('./mockData');
 const logger = require('../utils/logger');
 
 // ─── DECISION THRESHOLDS ─────────────────────────────────────────────────────
@@ -43,12 +43,17 @@ async function screenShipment(booking) {
     accountProfile = dbIds.accountProfile;
     deviceSignalData = dbIds.deviceSignalData;
   } catch (dbErr) {
-    logger.warn('DB entity upsert failed — running in mock mode', { error: dbErr.message });
+    logger.warn('DB entity upsert failed — using mockData profiles', { error: dbErr.message });
+    // Fallback: use rich shipper profiles from mockData.js so the ML model
+    // gets real behavioural baselines instead of treating everyone as a new account.
+    accountProfile = mockAccounts[booking.shipper_id] || null;
   }
 
   // ─── STEP 2: Build upstream signal objects (from DB or mock fallback) ───────
   const account = _buildAccountSignal(booking, accountProfile);
-  const payment = _buildPaymentSignal(booking, dbIds.paymentRow);
+  // When DB is unavailable, fall back to mockData payment/device profiles
+  const mockPaymentData = mockPayments[booking.payment_id] || null;
+  const payment = _buildPaymentSignal(booking, dbIds.paymentRow, mockPaymentData);
   const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData);
   const addressData = _buildAddressSignal(booking, dbIds.destAddressRow);
 
@@ -59,7 +64,7 @@ async function screenShipment(booking) {
   const ruleResult = evaluateRules(features);
 
   // ─── STEP 5: Run ML Model ─────────────────────────────────────────────────
-  const mlResult = scoreShipment(features);
+  const mlResult = await scoreShipment(features, booking.shipment_id || bookingRef);
 
   // ─── STEP 6: Risk Aggregation ─────────────────────────────────────────────
   const aggregatedRisk = aggregateRisk(ruleResult, mlResult, deviceSignals, features);
@@ -90,58 +95,68 @@ async function screenShipment(booking) {
         triggered_rules: ruleResult.triggered_rules,
       });
 
-      await repo.saveDecision({
-        shipment_id: dbIds.shipmentId,
-        assessment_id,
-        action: decision.action,
-        reason: decision.reason,
-      });
-
-      // Update shipment status to match decision
+      // Status mapping
       const statusMap = {
         ALLOW: 'ALLOWED', ALLOW_MONITOR: 'ALLOWED',
         VERIFY: 'SCREENING', REVIEW: 'HELD', BLOCK: 'BLOCKED',
       };
-      await repo.updateShipmentStatus(dbIds.shipmentId, statusMap[decision.action] || 'SCREENING');
+
+      const promises = [
+        repo.saveDecision({
+          shipment_id: dbIds.shipmentId,
+          assessment_id,
+          action: decision.action,
+          reason: decision.reason,
+        }),
+        repo.updateShipmentStatus(dbIds.shipmentId, statusMap[decision.action] || 'SCREENING'),
+        repo.logAuditEvent({
+          action: 'SCREENED',
+          entity_type: 'SHIPMENT',
+          entity_id: dbIds.shipmentId,
+          shipment_id: dbIds.shipmentId,
+          after_state: { risk_score: aggregatedRisk.risk_score, action: decision.action },
+        }),
+      ];
 
       // Auto-open fraud case for REVIEW or BLOCK
       if (decision.action === 'REVIEW' || decision.action === 'BLOCK') {
-        await repo.openFraudCase({
-          shipment_id: dbIds.shipmentId,
-          assessment_id,
-          account_id: dbIds.accountId,
-          risk_level: aggregatedRisk.risk_level,
-        });
+        promises.push(
+          repo.openFraudCase({
+            shipment_id: dbIds.shipmentId,
+            assessment_id,
+            account_id: dbIds.accountId,
+            risk_level: aggregatedRisk.risk_level,
+          })
+        );
       }
 
       // Write entity links to fraud graph
       if (dbIds.accountId && dbIds.deviceId) {
-        await repo.upsertEntityLink({
-          src_type: 'ACCOUNT', src_id: dbIds.accountId,
-          dst_type: 'DEVICE', dst_id: dbIds.deviceId, link_type: 'USES_DEVICE',
-        });
+        promises.push(
+          repo.upsertEntityLink({
+            src_type: 'ACCOUNT', src_id: dbIds.accountId,
+            dst_type: 'DEVICE', dst_id: dbIds.deviceId, link_type: 'USES_DEVICE',
+          })
+        );
       }
       if (dbIds.accountId && dbIds.paymentId) {
-        await repo.upsertEntityLink({
-          src_type: 'ACCOUNT', src_id: dbIds.accountId,
-          dst_type: 'PAYMENT', dst_id: dbIds.paymentId, link_type: 'USES_PAYMENT',
-        });
+        promises.push(
+          repo.upsertEntityLink({
+            src_type: 'ACCOUNT', src_id: dbIds.accountId,
+            dst_type: 'PAYMENT', dst_id: dbIds.paymentId, link_type: 'USES_PAYMENT',
+          })
+        );
       }
       if (dbIds.accountId && dbIds.shipmentId) {
-        await repo.upsertEntityLink({
-          src_type: 'ACCOUNT', src_id: dbIds.accountId,
-          dst_type: 'SHIPMENT', dst_id: dbIds.shipmentId, link_type: 'SHIPS_TO',
-        });
+        promises.push(
+          repo.upsertEntityLink({
+            src_type: 'ACCOUNT', src_id: dbIds.accountId,
+            dst_type: 'SHIPMENT', dst_id: dbIds.shipmentId, link_type: 'SHIPS_TO',
+          })
+        );
       }
 
-      // Audit log
-      await repo.logAuditEvent({
-        action: 'SCREENED',
-        entity_type: 'SHIPMENT',
-        entity_id: dbIds.shipmentId,
-        shipment_id: dbIds.shipmentId,
-        after_state: { risk_score: aggregatedRisk.risk_score, action: decision.action },
-      });
+      await Promise.all(promises);
 
       // Update shipper profile in background
       if (dbIds.accountId) {
@@ -212,32 +227,31 @@ async function _persistEntities(booking, bookingRef) {
     account_number: booking.shipper_id,
   });
 
-  // 3. Account profile from DB (for real behavioral features)
-  const accountProfile = await repo.getAccountProfile(booking.shipper_id);
+  // 3-6. Upsert Device, Payment, Addresses, and Account Profile in parallel
+  const [deviceRow, paymentRow, originAddr, destAddr, accountProfile] = await Promise.all([
+    repo.upsertDevice({
+      fingerprint_hash: booking.device_id || `unknown-${Date.now()}`,
+      device_type: 'api-client',
+    }),
+    booking.payment_id
+      ? repo.upsertPayment({
+          payment_token: booking.payment_id,
+          method_type: 'CREDIT_CARD',
+        })
+      : Promise.resolve(null),
+    repo.upsertAddress({ city: booking.origin || 'Unknown', country: 'IN' }),
+    repo.upsertAddress({ city: booking.destination || 'Unknown', country: 'IN' }),
+    repo.getAccountProfile(booking.shipper_id),
+  ]);
 
-  // 4. Device
-  const deviceRow = await repo.upsertDevice({
-    fingerprint_hash: booking.device_id || `unknown-${Date.now()}`,
-    device_type: 'api-client',
-  });
-  await repo.linkDeviceToAccount(accountId, deviceRow.device_id);
-  const deviceSignalData = await repo.getDeviceFraudSignals(deviceRow.device_id);
+  const paymentId = paymentRow ? paymentRow.payment_id : null;
 
-  // 5. Payment
-  let paymentRow = null;
-  let paymentId = null;
-  if (booking.payment_id) {
-    paymentRow = await repo.upsertPayment({
-      payment_token: booking.payment_id,
-      method_type: 'CREDIT_CARD',
-    });
-    paymentId = paymentRow.payment_id;
-    await repo.linkPaymentToAccount(accountId, paymentId, null);
-  }
-
-  // 6. Addresses
-  const originAddr = await repo.upsertAddress({ city: booking.origin || 'Unknown', country: 'IN' });
-  const destAddr = await repo.upsertAddress({ city: booking.destination || 'Unknown', country: 'IN' });
+  // Link device/payment and fetch signals in parallel
+  const [deviceSignalData] = await Promise.all([
+    repo.getDeviceFraudSignals(deviceRow.device_id),
+    repo.linkDeviceToAccount(accountId, deviceRow.device_id).catch(() => {}),
+    paymentId ? repo.linkPaymentToAccount(accountId, paymentId, null).catch(() => {}) : Promise.resolve(),
+  ]);
 
   // 7. Shipment
   const shipmentRow = await repo.createShipment({
@@ -267,60 +281,70 @@ async function _persistEntities(booking, bookingRef) {
 // ─── SIGNAL BUILDERS (bridge DB data → mock-compatible format) ────────────────
 
 function _buildAccountSignal(booking, dbProfile) {
-  if (dbProfile) {
+  if (!dbProfile) {
+    // Unknown shipper — treat as new account (genuinely high risk)
     return {
       shipper_id: booking.shipper_id,
-      account_status: dbProfile.status || 'ACTIVE',
-      account_tier: dbProfile.account_type || 'BUSINESS',
-      account_age_days: dbProfile.opened_at
-        ? Math.floor((Date.now() - new Date(dbProfile.opened_at)) / 86400000) : 0,
-      verified: true,
+      account_status: 'ACTIVE',
+      account_tier: 'BUSINESS',
+      account_age_days: 0,
+      verified: false,
       historical_profile: {
-        total_shipments: parseInt(dbProfile.total_shipments) || 0,
-        avg_shipments_per_day: parseFloat(dbProfile.avg_daily_volume) || 0,
-        avg_weight: parseFloat(dbProfile.avg_weight_kg) || 0,
-        max_historical_weight: parseFloat(dbProfile.avg_weight_kg) * 3 || 30,
-        usual_origins: dbProfile.common_origins || [],
-        usual_destinations: dbProfile.common_destinations || [],
-        usual_service_types: Object.keys(dbProfile.service_mix || {}),
-        usual_booking_hours: dbProfile.hour_histogram
-          ? dbProfile.hour_histogram.reduce((acc, v, i) => v > 0 ? [...acc, i] : acc, [])
-          : [],
+        total_shipments: 0, avg_shipments_per_day: 0, avg_weight: 0,
+        max_historical_weight: 0, usual_origins: [], usual_destinations: [],
+        usual_service_types: [], usual_booking_hours: [],
       },
       security: {
-        last_password_change: dbProfile.last_password_change_at,
-        last_profile_update: dbProfile.last_profile_change_at,
-        known_devices: dbProfile.known_devices || [],
-        known_payment_ids: dbProfile.known_payments || [],
+        last_password_change: null, last_profile_update: null,
+        known_devices: [], known_payment_ids: [],
       },
-      historical_fraud: {
-        previous_fraud_cases: parseInt(dbProfile.fraud_count) || 0,
-        previous_review_cases: 0,
-      },
+      historical_fraud: { previous_fraud_cases: 0, previous_review_cases: 0 },
     };
   }
-  // fallback: treat as new account
+
+  // ── mockData.js format (has historical_profile, security, historical_fraud directly) ──
+  if (dbProfile.historical_profile) {
+    return dbProfile;   // already in the right shape — pass straight through
+  }
+
+  // ── PostgreSQL DB row format ──
   return {
     shipper_id: booking.shipper_id,
-    account_status: 'ACTIVE',
-    account_tier: 'BUSINESS',
-    account_age_days: 0,
-    verified: false,
+    account_status: dbProfile.status || 'ACTIVE',
+    account_tier: dbProfile.account_type || 'BUSINESS',
+    account_age_days: dbProfile.opened_at
+      ? Math.floor((Date.now() - new Date(dbProfile.opened_at)) / 86400000) : 0,
+    verified: true,
     historical_profile: {
-      total_shipments: 0, avg_shipments_per_day: 0, avg_weight: 0,
-      max_historical_weight: 0, usual_origins: [], usual_destinations: [],
-      usual_service_types: [], usual_booking_hours: [],
+      total_shipments: parseInt(dbProfile.total_shipments) || 0,
+      avg_shipments_per_day: parseFloat(dbProfile.avg_daily_volume) || 0,
+      avg_weight: parseFloat(dbProfile.avg_weight_kg) || 0,
+      max_historical_weight: parseFloat(dbProfile.avg_weight_kg) * 3 || 30,
+      usual_origins: dbProfile.common_origins || [],
+      usual_destinations: dbProfile.common_destinations || [],
+      usual_service_types: Object.keys(dbProfile.service_mix || {}),
+      usual_booking_hours: dbProfile.hour_histogram
+        ? dbProfile.hour_histogram.reduce((acc, v, i) => v > 0 ? [...acc, i] : acc, [])
+        : [],
     },
     security: {
-      last_password_change: null, last_profile_update: null,
-      known_devices: [], known_payment_ids: [],
+      last_password_change: dbProfile.last_password_change_at,
+      last_profile_update: dbProfile.last_profile_change_at,
+      known_devices: dbProfile.known_devices || [],
+      known_payment_ids: dbProfile.known_payments || [],
     },
-    historical_fraud: { previous_fraud_cases: 0, previous_review_cases: 0 },
+    historical_fraud: {
+      previous_fraud_cases: parseInt(dbProfile.fraud_count) || 0,
+      previous_review_cases: 0,
+    },
   };
 }
 
-function _buildPaymentSignal(booking, paymentRow) {
+function _buildPaymentSignal(booking, paymentRow, mockPayment = null) {
   if (!booking.payment_id) return null;
+
+  // Use rich mock payment data if available (DB is offline)
+  if (mockPayment) return mockPayment;
   const isNew = paymentRow && new Date(paymentRow.first_seen_at) > new Date(Date.now() - 3600000);
   return {
     payment_id: booking.payment_id,

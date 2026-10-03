@@ -121,29 +121,57 @@ class MockMLAdapter:
 
 class RealMLAdapter:
     """
-    Pluggable adapter for Person 1's trained model.
+    HTTP adapter for the Python ML Microservice running on port 8001.
 
-    TO INTEGRATE THE REAL MODEL:
-    1. Import your model / prediction function here.
-    2. Implement the predict() method to call it.
-    3. Set USE_MOCK_ML=false in .env.
+    Calls POST /predict on the FastAPI service (ml/service/app.py).
+    Uses stdlib urllib — no extra dependencies required.
+    2-second timeout; on failure FraudMLService.predict() degrades to MEDIUM risk.
 
-    Example using a scikit-learn style model:
-
-        import joblib
-        _model = joblib.load(settings.ML_MODEL_PATH)
-
-        def predict(self, ml_input: MLInput) -> MLOutput:
-            X = [list(ml_input.features.values())]
-            prob = _model.predict_proba(X)[0][1]
-            return MLOutput(fraud_probability=prob, top_reasons=[])
+    Activate by setting USE_MOCK_ML=false and ML_SERVICE_URL=http://localhost:8001
+    in your .env file.
     """
 
     def predict(self, ml_input: MLInput) -> MLOutput:
-        raise NotImplementedError(
-            "RealMLAdapter is not yet configured. "
-            "Set USE_MOCK_ML=true or implement RealMLAdapter.predict()."
+        import json
+        import urllib.request
+        import urllib.error
+
+        url = getattr(settings, 'ML_SERVICE_URL', 'http://localhost:8001') + '/predict'
+
+        payload = json.dumps({
+            'shipment_id': ml_input.shipment_id,
+            'features': ml_input.features,
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={'Content-Type': 'application/json'},
         )
+
+        try:
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                result = json.loads(resp.read().decode())
+
+            log.info(
+                "RealML: shipment=%s fraud_prob=%.4f risk_level=%s",
+                ml_input.shipment_id,
+                result.get('fraud_probability', 0.5),
+                result.get('risk_level', 'UNKNOWN'),
+            )
+            return MLOutput(
+                fraud_probability=result.get('fraud_probability', 0.5),
+                risk_score=result.get('risk_score'),
+                risk_level=result.get('risk_level'),
+                top_reasons=result.get('top_reasons', ['unknown']),
+                raw=result,
+            )
+
+        except urllib.error.URLError as exc:
+            log.error("RealML: ML service connection error for %s: %s", ml_input.shipment_id, exc)
+            raise Exception(f"ML Service unreachable: {exc}") from exc
+        except Exception as exc:
+            log.error("RealML: unexpected error for %s: %s", ml_input.shipment_id, exc)
+            raise
 
 
 # ─── Service facade ──────────────────────────────────────────────────────────

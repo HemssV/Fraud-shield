@@ -7,6 +7,7 @@ def flatten_features(features_dict: Dict[str, Any]) -> np.ndarray:
     """
     Transforms the nested Node.js features object into a flat numpy array
     suitable for the ML model, filling in missing keys with defaults.
+    Safely handles None/null values (JavaScript null → Python None).
     """
     flat_features = []
     
@@ -17,6 +18,11 @@ def flatten_features(features_dict: Dict[str, Any]) -> np.ndarray:
                 continue # Skip non-scalar features (like arrays/strings)
                 
             val = provided_category.get(feature_name, default_val)
+            
+            # Guard: JavaScript null arrives as Python None — fall back to default
+            if val is None:
+                val = default_val
+                
             # Ensure proper type conversion
             if isinstance(default_val, bool):
                 val = bool(val)

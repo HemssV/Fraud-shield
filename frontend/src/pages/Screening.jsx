@@ -4,7 +4,7 @@ import { api } from '../services/api';
 import { 
   ShieldCheck, ShieldAlert, AlertTriangle, XCircle, CheckCircle2, 
   ArrowRight, RefreshCw, Cpu, Database, Fingerprint, Network, 
-  Zap, Clock, Package, MapPin, CreditCard, Laptop, Sparkles, Send
+  Zap, Clock, Package, MapPin, CreditCard, Laptop, Sparkles, Send, RotateCcw
 } from 'lucide-react';
 
 const PRESETS = [
@@ -112,15 +112,7 @@ export default function Screening() {
     setIsScreening(true);
     setErrorMsg(null);
     setAssessmentResult(null);
-    setActivePipelineStep(1);
-
-    // Simulate animated pipeline progression
-    const stepInterval = setInterval(() => {
-      setActivePipelineStep(prev => {
-        if (prev < 5) return prev + 1;
-        return prev;
-      });
-    }, 450);
+    setActivePipelineStep(2);
 
     const payload = {
       shipper_id: formData.shipper_id.trim(),
@@ -135,17 +127,12 @@ export default function Screening() {
     };
 
     try {
+      setActivePipelineStep(3);
       const data = await api.screenShipment(payload);
-      
-      // Ensure pipeline animation completes before displaying result
-      setTimeout(() => {
-        clearInterval(stepInterval);
-        setActivePipelineStep(5);
-        setAssessmentResult(data);
-        setIsScreening(false);
-      }, 2000);
+      setActivePipelineStep(5);
+      setAssessmentResult(data);
+      setIsScreening(false);
     } catch (err) {
-      clearInterval(stepInterval);
       setIsScreening(false);
       console.warn('Backend call failed, using graceful simulation:', err);
 
@@ -469,11 +456,11 @@ export default function Screening() {
               </div>
 
               {/* Action Buttons */}
-              <div className="pt-4">
+              <div className="pt-4 flex items-center gap-3">
                 <button
                   type="submit"
                   disabled={isScreening}
-                  className="w-full btn-primary py-3 rounded-xl flex items-center justify-center gap-2 font-semibold text-sm transition-all duration-200 shadow-[0_0_20px_rgba(234,179,8,0.3)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  className="flex-1 btn-primary py-3 rounded-xl flex items-center justify-center gap-2 font-semibold text-sm transition-all duration-200 shadow-[0_0_20px_rgba(234,179,8,0.3)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isScreening ? (
                     <>
@@ -487,6 +474,21 @@ export default function Screening() {
                     </>
                   )}
                 </button>
+
+                {assessmentResult && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssessmentResult(null);
+                      setSelectedPreset(null);
+                    }}
+                    className="btn-secondary py-3 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold text-zinc-300 hover:text-white cursor-pointer"
+                    title="Clear current result and screen another"
+                  >
+                    <RotateCcw size={16} />
+                    <span className="hidden sm:inline">Reset</span>
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -653,11 +655,19 @@ export default function Screening() {
                       {decision.reason || 'Decision reached according to business risk thresholds.'}
                     </div>
 
-                    {/* Action button to Investigation view */}
-                    <div className="mt-5 pt-4 border-t border-[rgba(255,255,255,0.08)] flex items-center justify-between">
-                      <span className="text-xs text-secondary">
-                        Latency: <span className="text-zinc-400 font-mono">{assessmentResult.fraud_assessment?.pipeline?.total_latency_ms || 210}ms</span>
-                      </span>
+                    {/* Action button to Investigation view & Re-screen */}
+                    <div className="mt-5 pt-4 border-t border-[rgba(255,255,255,0.08)] flex flex-wrap items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAssessmentResult(null);
+                          setSelectedPreset(null);
+                        }}
+                        className="btn-secondary py-2 px-3.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-zinc-300 hover:text-white cursor-pointer"
+                      >
+                        <RotateCcw size={14} />
+                        <span>Screen Another Shipment</span>
+                      </button>
 
                       <button
                         type="button"
@@ -673,70 +683,121 @@ export default function Screening() {
               })()}
 
               {/* Reasons & Signals Breakdown Card */}
-              <div className="glass-panel p-6 border border-[rgba(234,179,8,0.18)]">
-                <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
-                  <AlertTriangle size={18} className="text-[#EAB308]" />
-                  Key Fraud Drivers & Triggered Reasons
-                </h3>
+              {(() => {
+                const isClean = assessmentResult.fraud_assessment?.decision?.action === 'ALLOW' || 
+                                assessmentResult.fraud_assessment?.decision?.action === 'ALLOW_MONITOR' ||
+                                assessmentResult.fraud_assessment?.risk?.risk_level === 'LOW';
 
-                {assessmentResult.fraud_assessment?.top_reasons?.length > 0 ? (
-                  <ul className="space-y-2.5">
-                    {assessmentResult.fraud_assessment.top_reasons.map((reason, idx) => (
-                      <li 
-                        key={idx}
-                        className="flex items-start gap-3 p-3 rounded-lg bg-[rgba(20,20,20,0.6)] border border-[rgba(234,179,8,0.1)] text-xs text-zinc-200"
-                      >
-                        <span className="w-5 h-5 rounded-full bg-[rgba(234,179,8,0.15)] text-[#FDE047] font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">
-                          {idx + 1}
+                return (
+                  <div className={`glass-panel p-6 border ${isClean ? 'border-emerald-500/20' : 'border-[rgba(234,179,8,0.18)]'}`}>
+                    <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                      {isClean ? (
+                        <>
+                          <CheckCircle2 size={18} className="text-[#22C55E]" />
+                          <span>Verified Trust Signals & Clean Baseline Validation</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle size={18} className="text-[#EAB308]" />
+                          <span>Key Fraud Drivers & Triggered Reasons</span>
+                        </>
+                      )}
+                    </h3>
+
+                    {assessmentResult.fraud_assessment?.top_reasons?.length > 0 ? (
+                      <ul className="space-y-2.5">
+                        {assessmentResult.fraud_assessment.top_reasons.map((reason, idx) => (
+                          <li 
+                            key={idx}
+                            className={`flex items-start gap-3 p-3 rounded-lg border text-xs text-zinc-200 ${
+                              isClean 
+                                ? 'bg-[rgba(34,197,94,0.04)] border-[rgba(34,197,94,0.15)]' 
+                                : 'bg-[rgba(20,20,20,0.6)] border-[rgba(234,179,8,0.1)]'
+                            }`}
+                          >
+                            <span className={`w-5 h-5 rounded-full font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5 ${
+                              isClean 
+                                ? 'bg-[rgba(34,197,94,0.15)] text-[#22C55E]' 
+                                : 'bg-[rgba(234,179,8,0.15)] text-[#FDE047]'
+                            }`}>
+                              {idx + 1}
+                            </span>
+                            <span className="leading-relaxed">{reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-xs text-zinc-500 py-4 text-center">
+                        {isClean 
+                          ? 'Shipper account and route parameters conform strictly to legitimate verified profiles.'
+                          : 'No high-risk flags triggered. All signals within normal operating variance.'}
+                      </div>
+                    )}
+
+                    {/* Signals radar overview */}
+                    {assessmentResult.fraud_assessment?.signals && (
+                      <div className={`mt-6 pt-5 border-t ${isClean ? 'border-emerald-500/15' : 'border-[rgba(234,179,8,0.1)]'}`}>
+                        <span className="text-xs font-semibold text-secondary uppercase tracking-wider block mb-3">
+                          Signal Anomaly Breakdown
                         </span>
-                        <span className="leading-relaxed">{reason}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="text-xs text-zinc-500 py-4 text-center">
-                    No high-risk flags triggered. All signals within normal operating variance.
-                  </div>
-                )}
-
-                {/* Signals radar overview */}
-                {assessmentResult.fraud_assessment?.signals && (
-                  <div className="mt-6 pt-5 border-t border-[rgba(234,179,8,0.1)]">
-                    <span className="text-xs font-semibold text-secondary uppercase tracking-wider block mb-3">
-                      Signal Anomaly Breakdown
-                    </span>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {Object.entries(assessmentResult.fraud_assessment.signals).map(([key, val]) => (
-                        <div key={key} className="p-2.5 rounded-lg bg-[rgba(10,10,10,0.5)] border border-[rgba(255,255,255,0.05)]">
-                          <div className="text-[11px] text-secondary capitalize">{key}</div>
-                          <div className={`text-sm font-bold tabular-nums mt-0.5 ${val > 20 ? 'text-[#F97316]' : 'text-zinc-200'}`}>
-                            {val} pts
-                          </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {Object.entries(assessmentResult.fraud_assessment.signals).map(([key, val]) => (
+                            <div key={key} className="p-2.5 rounded-lg bg-[rgba(10,10,10,0.5)] border border-[rgba(255,255,255,0.05)]">
+                              <div className="text-[11px] text-secondary capitalize">{key}</div>
+                              <div className={`text-sm font-bold tabular-nums mt-0.5 ${val > 20 ? 'text-[#F97316]' : (isClean ? 'text-[#22C55E]' : 'text-zinc-200')}`}>
+                                {val} pts
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
             </>
           ) : (
-            /* Empty State / Standby Card */
-            <div className="glass-panel p-10 border border-dashed border-[rgba(234,179,8,0.2)] text-center flex flex-col items-center justify-center min-h-[440px]">
-              <div className="w-16 h-16 rounded-2xl bg-[rgba(234,179,8,0.08)] border border-[rgba(234,179,8,0.2)] flex items-center justify-center text-[#EAB308] mb-4">
+            /* Live Screening Console Ready Card */
+            <div className="glass-panel p-8 sm:p-10 border border-[rgba(234,179,8,0.2)] text-center flex flex-col items-center justify-center min-h-[440px] relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none"></div>
+              
+              <div className="w-16 h-16 rounded-2xl bg-[rgba(234,179,8,0.08)] border border-[rgba(234,179,8,0.2)] flex items-center justify-center text-[#EAB308] mb-4 shadow-[0_0_25px_rgba(234,179,8,0.15)]">
                 <ShieldCheck size={32} />
               </div>
-              <h3 className="text-lg font-bold text-white">Fraud Decision Engine Standby</h3>
-              <p className="text-xs text-secondary max-w-sm mt-2 leading-relaxed">
-                Configure shipment parameters or pick one of the demo scenarios above, then execute real-time screening to view the risk score, rule breakdown, and automated dispatch decision.
+              <h3 className="text-lg font-bold text-white">Real-Time Ingestion & Fraud Screening Console</h3>
+              <p className="text-xs text-secondary max-w-md mt-2 leading-relaxed">
+                This console ingests new shipment bookings directly into the live database registry. Every execution extracts real-time entity features, triggers rule heuristics, runs ML inference, and immediately creates a fraud audit record.
               </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full max-w-md mt-6 text-left">
+                <div className="p-3 rounded-lg bg-black/40 border border-white/5">
+                  <div className="text-[10px] text-zinc-500 font-mono">01. INGEST</div>
+                  <div className="text-xs font-semibold text-zinc-200 mt-0.5">Persist Booking</div>
+                </div>
+                <div className="p-3 rounded-lg bg-black/40 border border-white/5">
+                  <div className="text-[10px] text-zinc-500 font-mono">02. EVALUATE</div>
+                  <div className="text-xs font-semibold text-zinc-200 mt-0.5">Rules & ML Scoring</div>
+                </div>
+                <div className="p-3 rounded-lg bg-black/40 border border-white/5">
+                  <div className="text-[10px] text-zinc-500 font-mono">03. DISPATCH</div>
+                  <div className="text-xs font-semibold text-zinc-200 mt-0.5">Case & Policy Action</div>
+                </div>
+              </div>
               
               <div className="mt-6 flex flex-wrap gap-2 justify-center">
+                <button
+                  type="button"
+                  onClick={() => loadPreset(PRESETS[0])}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[rgba(34,197,94,0.1)] text-[#22C55E] border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                >
+                  Load Clean Baseline Preset &rarr;
+                </button>
                 <button
                   type="button"
                   onClick={() => loadPreset(PRESETS[1])}
                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[rgba(234,179,8,0.1)] text-[#FDE047] border border-[rgba(234,179,8,0.3)] hover:bg-[rgba(234,179,8,0.2)] transition-colors cursor-pointer"
                 >
-                  Test Suspended Shipper Scenario &rarr;
+                  Load Suspicious Route Preset &rarr;
                 </button>
               </div>
             </div>

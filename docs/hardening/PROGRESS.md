@@ -26,10 +26,10 @@
 - [x] 3.5 Structured logging (Status: DONE)
 
 ## PHASE 4: ML SERVICE AND TRAINING
-- [ ] 4.1 Synthetic training data (Status: NOT STARTED)
-- [ ] 4.2 Train-serve parity script (Status: NOT STARTED)
-- [ ] 4.3 metadata.json updates (Status: NOT STARTED)
-- [ ] 4.4 Model bounding (Status: NOT STARTED)
+- [x] 4.1 Synthetic training data (Status: DONE)
+- [x] 4.2 Train-serve parity script (Status: DONE)
+- [x] 4.3 metadata.json updates (Status: DONE)
+- [x] 4.4 Model bounding (Status: DONE)
 
 ## PHASE 5: ADAPTIVE BEHAVIORAL PROFILING
 - [ ] 5.1 Profile max age limit (Status: NOT STARTED)

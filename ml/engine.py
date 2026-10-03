@@ -107,9 +107,11 @@ class FraudEngine:
             
             # 4. Calibration
             fraud_prob = float(self.calibrator.predict([raw_pred])[0])
+            fraud_prob = max(0.0, min(1.0, fraud_prob))
             
             # 5. Formulate response
             ml_score = round(fraud_prob * 100, 1)
+            ml_score = max(0.0, min(100.0, ml_score))
             
             if ml_score >= 85: risk_level = "CRITICAL"
             elif ml_score >= 70: risk_level = "HIGH"

@@ -190,7 +190,7 @@ export default function Investigation() {
             },
             genai_explanation: {
               explanation_id: `AI-EXP-${currentCaseId}`,
-              llm_model: 'Gemini 3.8 Flash',
+              llm_model: 'AI Analysis',
               summary: `This shipment presents critical anomalous markers. Shipper ${isCritical ? 'S4004' : 'S1001'} booked an extreme weight package (${isCritical ? '200' : '48'} kg) to destination corridor ${defaultDest} using an unrecognized device terminal with masked geolocation. The combination of behavioral weight deviation and identity shift points to a high probability of credential compromise or illicit cargo diversion.`,
               recommended_actions: [
                 'Do not release package for dispatch hub transfer.',
@@ -226,7 +226,7 @@ export default function Investigation() {
         ...prev,
         genai_explanation: {
           explanation_id: result.explanation_id,
-          llm_model: result.llm_model && !result.llm_model.startsWith('mock') ? result.llm_model : 'Gemini 3.8 Flash',
+          llm_model: result.llm_model && !result.llm_model.startsWith('mock') ? result.llm_model : 'AI Analysis',
           summary: result.summary,
           recommended_actions: result.recommended_actions || [],
           grounded_reason_ids: result.grounded_reason_ids || [],
@@ -240,7 +240,7 @@ export default function Investigation() {
           ...prev,
           genai_explanation: {
             explanation_id: `AI-${Date.now()}`,
-            llm_model: 'Gemini 3.8 Flash',
+            llm_model: 'AI Analysis',
             summary: `Regenerated analysis: Real-time telemetry indicates high confidence anomaly. Multiple synchronized risk indicators (weight ratio > 5x, untrusted network signature, and rapid retry velocity) collectively corroborate an elevated risk score of ${prev?.risk_assessment?.risk_score || 85}/100. Dispatch hold strongly recommended.`,
             recommended_actions: [
               'Place physical custody hold at dispatch sort facility.',

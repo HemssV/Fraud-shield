@@ -115,9 +115,9 @@ async function _screenShipmentCore(booking, bookingRef) {
   // ─── STEP 9: Signal breakdown ─────────────────────────────────────────────
   const signalBreakdown = computeSignalBreakdown(ruleResult, mlResult);
 
-  // ─── STEP 10: Persist assessment + decision to Neon ───────────────────────
+  // ─── STEP 10: Persist assessment + decision to Neon (UNLESS SIMULATE) ───────
   let assessment_id = null;
-  if (dbIds.shipmentId) {
+  if (dbIds.shipmentId && !booking.simulate) {
     try {
       assessment_id = await repo.saveRiskAssessment({
         shipment_id: dbIds.shipmentId,

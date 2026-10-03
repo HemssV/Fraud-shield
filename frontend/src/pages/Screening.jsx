@@ -217,7 +217,8 @@ export default function Screening() {
       payment_id: formData.payment_id.trim(),
       device_id: formData.device_id.trim(),
       package_count: parseInt(formData.package_count, 10) || 1,
-      booking_timestamp: new Date().toISOString()
+      booking_timestamp: new Date().toISOString(),
+      simulate: true
     };
 
     try {

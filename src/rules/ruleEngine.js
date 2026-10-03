@@ -37,6 +37,22 @@ const RULES = [
     description: () => 'Shipment weight exceeds the shipper\'s historical maximum',
   },
   {
+    code: 'EXTREME_WEIGHT',
+    name: 'Extremely high absolute weight',
+    category: 'BEHAVIOR',
+    risk_points: 15,
+    evaluate: (f) => f.behavioral.weight_z_score > 5, // A Z-score > 5 or just extreme value
+    description: () => 'Shipment weight is an extreme statistical outlier',
+  },
+  {
+    code: 'HIGH_RISK_ROUTE',
+    name: 'High risk corridor routing',
+    category: 'BEHAVIOR',
+    risk_points: 25,
+    evaluate: (f) => f.behavioral.is_new_origin && f.behavioral.is_new_destination,
+    description: () => 'Route involves an entirely new origin and destination corridor',
+  },
+  {
     code: 'NEW_DESTINATION',
     name: 'Destination is new for this shipper',
     category: 'BEHAVIOR',

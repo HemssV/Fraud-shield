@@ -35,7 +35,7 @@ const router = express.Router();
 router.post('/', async (req, res, next) => {
   try {
     // Allow shipment_id to be provided (for re-screening)
-    const { shipment_id, ...bookingFields } = req.body;
+    const { shipment_id, simulate, ...bookingFields } = req.body;
 
     // Validate the booking fields
     const { error, value: bookingData } = bookingSchema.validate(bookingFields, {
@@ -48,10 +48,9 @@ router.post('/', async (req, res, next) => {
       throw new AppError('Validation error', 400, 'VALIDATION_ERROR', details);
     }
 
-
-
     const screeningInput = {
       shipment_id: shipment_id || `SH${Date.now()}`,
+      simulate: simulate === true,
       ...bookingData,
     };
 

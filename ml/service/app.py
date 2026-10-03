@@ -4,8 +4,9 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from ml.config import DATA_DIR
@@ -32,6 +33,61 @@ class FeedbackRequest(BaseModel):
     shipment_id: str
     label: int
     fraud_type: Optional[str] = None
+
+
+def _service_status() -> dict:
+    return {
+        "service": "FraudShield ML Service",
+        "status": "ok",
+        "mock_mode": MOCK_MODE,
+        "model_loaded": not engine.degraded,
+        "model_version": engine.version,
+        "endpoints": {
+            "health": "GET /health",
+            "model_info": "GET /model-info",
+            "score": "POST /score",
+            "predict": "POST /predict",
+            "feedback": "POST /feedback",
+            "openapi": "GET /openapi.json",
+            "docs": "GET /docs",
+        },
+    }
+
+
+@app.get("/")
+def root(request: Request):
+    """Browser-friendly landing; JSON for API clients."""
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and "application/json" not in accept:
+        status = _service_status()
+        loaded = "yes" if status["model_loaded"] else "no (degraded)"
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>FraudShield ML Service</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }}
+    h1 {{ font-size: 1.35rem; }}
+    code {{ background: #f4f4f5; padding: 0.1rem 0.35rem; border-radius: 4px; }}
+    a {{ color: #2563eb; }}
+    .ok {{ color: #16a34a; font-weight: 600; }}
+  </style>
+</head>
+<body>
+  <h1>FraudShield ML Service</h1>
+  <p class="ok">Running — model {status["model_version"]} loaded: {loaded}</p>
+  <ul>
+    <li><a href="/docs">Interactive API docs</a> (<code>/docs</code>)</li>
+    <li><a href="/health">Health check</a> (<code>/health</code>)</li>
+    <li><a href="/model-info">Model info</a> (<code>/model-info</code>)</li>
+  </ul>
+  <p>Scoring: <code>POST /score</code> · Django adapter: <code>POST /predict</code></p>
+</body>
+</html>"""
+        return HTMLResponse(html)
+    return _service_status()
+
 
 @app.get("/health")
 def health():

@@ -13,7 +13,7 @@ const repo = require('../db/repository');
 const { generateFeatures } = require('../features/featureGenerator');
 const { evaluateRules } = require('../rules/ruleEngine');
 const { scoreShipment } = require('../ml/fraudModel');
-const { decisionThresholds, accounts: mockAccounts, payments: mockPayments } = require('./mockData');
+const { decisionThresholds, accounts: mockAccounts, payments: mockPayments, fraudSignals: mockFraudSignals, addressConfidence: mockAddressConfidence } = require('./mockData');
 const logger = require('../utils/logger');
 
 // ─── DECISION THRESHOLDS ─────────────────────────────────────────────────────
@@ -50,12 +50,20 @@ async function screenShipment(booking) {
   }
 
   // ─── STEP 2: Build upstream signal objects (from DB or mock fallback) ───────
-  const account = _buildAccountSignal(booking, accountProfile);
-  // When DB is unavailable, fall back to mockData payment/device profiles
+  // Always prefer mockData for demo entities (S*, P*) to ensure consistent demo behavior,
+  // even if the DB successfully persisted an empty/new row for them.
+  const finalAccountProfile = mockAccounts[booking.shipper_id] || accountProfile;
+  const account = _buildAccountSignal(booking, finalAccountProfile);
+  
   const mockPaymentData = mockPayments[booking.payment_id] || null;
   const payment = _buildPaymentSignal(booking, dbIds.paymentRow, mockPaymentData);
-  const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData);
-  const addressData = _buildAddressSignal(booking, dbIds.destAddressRow);
+  
+  // For devices and addresses, we rely on the builders which can be updated similarly if needed
+  const mockDeviceData = mockFraudSignals[booking.device_id] || null;
+  const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData, mockDeviceData);
+  
+  const mockAddressData = mockAddressConfidence[booking.destination] || null;
+  const addressData = _buildAddressSignal(booking, dbIds.destAddressRow, mockAddressData);
 
   // ─── STEP 3: Generate engineered features ─────────────────────────────────
   const features = generateFeatures(booking, account, payment, deviceSignals, addressData);
@@ -343,7 +351,7 @@ function _buildAccountSignal(booking, dbProfile) {
 function _buildPaymentSignal(booking, paymentRow, mockPayment = null) {
   if (!booking.payment_id) return null;
 
-  // Use rich mock payment data if available (DB is offline)
+  // Always use rich mock payment data if available to ensure demo consistency
   if (mockPayment) return mockPayment;
   const isNew = paymentRow && new Date(paymentRow.first_seen_at) > new Date(Date.now() - 3600000);
   return {
@@ -365,7 +373,9 @@ function _buildPaymentSignal(booking, paymentRow, mockPayment = null) {
   };
 }
 
-function _buildDeviceSignal(booking, deviceRow, signalData) {
+function _buildDeviceSignal(booking, deviceRow, signalData, mockDevice = null) {
+  if (mockDevice) return mockDevice;
+  
   if (!deviceRow) {
     return {
       device_id: booking.device_id || 'unknown',
@@ -401,7 +411,9 @@ function _buildDeviceSignal(booking, deviceRow, signalData) {
   };
 }
 
-function _buildAddressSignal(booking, addrRow) {
+function _buildAddressSignal(booking, addrRow, mockAddress = null) {
+  if (mockAddress) return mockAddress;
+  
   const city = booking.destination || 'Unknown';
   const score = addrRow?.confidence_score != null ? addrRow.confidence_score / 100 : 0.7;
   return {

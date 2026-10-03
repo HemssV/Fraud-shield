@@ -42,7 +42,7 @@ const PRESET_CLUSTERS = [
   {
     id: 'ato-cluster',
     name: 'ATO Compromise Cluster (Device Mismatch)',
-    accountId: 'SH10045',
+    accountId: '68ebcbad-2690-44fa-9c8c-e1863b1fe355',
     description: 'Legitimate legacy account hijacked from an unauthorized overseas VPN session.',
     riskLevel: 'HIGH',
     nodes: [
@@ -62,7 +62,7 @@ const PRESET_CLUSTERS = [
   {
     id: 'clean-cluster',
     name: 'Verified Enterprise Network (Clean Baseline)',
-    accountId: 'NORMAL-CORP',
+    accountId: '86f82aa8-4f2a-4588-ac76-b63ccc6ac41c',
     description: 'Compliant commercial shipper displaying zero entity overlaps or anonymous signals.',
     riskLevel: 'LOW',
     nodes: [
@@ -81,6 +81,7 @@ const PRESET_CLUSTERS = [
 
 export default function FraudGraph() {
   const [selectedClusterId, setSelectedClusterId] = useState('ring-alpha');
+  const graphCacheRef = useRef({});
   const [graphData, setGraphData] = useState(PRESET_CLUSTERS[0]);
   const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -92,31 +93,62 @@ export default function FraudGraph() {
 
   const currentCluster = PRESET_CLUSTERS.find(c => c.id === selectedClusterId) || PRESET_CLUSTERS[0];
 
-  // Fetch or Switch Graph
+  // Fetch or Switch Graph with client cache
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
     setSelectedNode(null);
+
+    // If cached in client memory, render instantly
+    if (graphCacheRef.current[currentCluster.accountId]) {
+      setGraphData(graphCacheRef.current[currentCluster.accountId]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
 
     async function loadGraph() {
       try {
         const liveData = await api.getFraudGraph(currentCluster.accountId);
         if (isMounted && liveData && liveData.nodes && liveData.nodes.length > 0) {
-          // Format backend nodes with layout coordinates
+          // Format backend nodes with clean hub-and-spoke layout coordinates
+          const otherNodes = liveData.nodes.filter(n => !(n.entity_type === 'ACCOUNT' && n.entity_id === liveData.account_id));
+          const hasCenter = liveData.nodes.some(n => n.entity_type === 'ACCOUNT' && n.entity_id === liveData.account_id);
+
           const formattedNodes = liveData.nodes.map((node, i) => {
-            const angle = (i / liveData.nodes.length) * 2 * Math.PI;
-            const radius = 160;
+            const isCenter = hasCenter && node.entity_type === 'ACCOUNT' && node.entity_id === liveData.account_id;
+            let x = 400;
+            let y = 220;
+
+            if (!isCenter) {
+              const otherIdx = otherNodes.indexOf(node);
+              const totalOthers = Math.max(otherNodes.length, 1);
+              const angle = (otherIdx / totalOthers) * 2 * Math.PI;
+              const radius = 180;
+              x = 400 + Math.cos(angle) * radius;
+              y = 220 + Math.sin(angle) * radius;
+            }
+
             const isSuspicious = node.entity_type === 'DEVICE' || liveData.risk_signals?.length > 0;
+            const shortId = (node.entity_id || '').slice(0, 6);
+            const label = node.entity_type === 'ACCOUNT' 
+              ? `Account S${shortId}` 
+              : node.entity_type === 'DEVICE' 
+              ? `Device D-${shortId}` 
+              : node.entity_type === 'PAYMENT' 
+              ? `Card ****${shortId.slice(-4)}` 
+              : `${node.entity_type} ${shortId}`;
+
             return {
               id: node.id || `NODE-${i}`,
-              label: `${node.entity_type}: ${node.entity_id?.slice(0, 8)}...`,
+              label: label,
               type: node.entity_type || 'ACCOUNT',
-              x: 400 + Math.cos(angle) * radius,
-              y: 220 + Math.sin(angle) * radius,
+              x,
+              y,
               isSuspicious: isSuspicious,
               riskScore: isSuspicious ? 85 : 20,
               status: isSuspicious ? 'HIGH_RISK_LINK' : 'ACTIVE',
-              details: `Entity ${node.entity_type} dynamically mapped from PostgreSQL entity_links.`
+              details: `Live PostgreSQL entity: ${node.entity_type} (${node.entity_id})`
             };
           });
 
@@ -127,11 +159,14 @@ export default function FraudGraph() {
             isSuspicious: e.weight > 1 || currentCluster.riskLevel === 'CRITICAL'
           }));
 
-          setGraphData({
+          const fullGraph = {
             ...currentCluster,
             nodes: formattedNodes,
             edges: formattedEdges
-          });
+          };
+
+          graphCacheRef.current[currentCluster.accountId] = fullGraph;
+          setGraphData(fullGraph);
           setLoading(false);
           return;
         }
@@ -140,6 +175,7 @@ export default function FraudGraph() {
       }
 
       if (isMounted) {
+        graphCacheRef.current[currentCluster.accountId] = currentCluster;
         setGraphData(currentCluster);
         setLoading(false);
       }

@@ -12,6 +12,8 @@ produced by Backend Person A.
 """
 from __future__ import annotations
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -29,6 +31,30 @@ from intelligence.services.genai_service import get_explanation_for_assessment
 from intelligence.services.fraud_graph_service import get_account_graph
 
 log = logging.getLogger(__name__)
+
+_case_pool = ThreadPoolExecutor(max_workers=4)
+_CASE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_CASE_LIST_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+def get_cached_case(key: str, ttl_seconds: float, compute_fn):
+    now = time.time()
+    if key in _CASE_CACHE:
+        cached_time, cached_val = _CASE_CACHE[key]
+        if now - cached_time < ttl_seconds:
+            return cached_val
+    val = compute_fn()
+    _CASE_CACHE[key] = (now, val)
+    return val
+
+def invalidate_case_cache(case_id: str | None = None):
+    global _CASE_CACHE, _CASE_LIST_CACHE
+    _CASE_LIST_CACHE.clear()
+    if case_id:
+        for k in list(_CASE_CACHE.keys()):
+            if case_id in k:
+                _CASE_CACHE.pop(k, None)
+    else:
+        _CASE_CACHE.clear()
 
 # SLA hours by priority
 SLA_HOURS = {
@@ -90,17 +116,23 @@ def open_case_for_assessment(assessment: RiskAssessment) -> FraudCase:
 
 # ─── Case retrieval ───────────────────────────────────────────────────────────
 
-def get_case_detail(case_id: str) -> dict[str, Any]:
+def get_case_detail(case_id: str, include_graph: bool = False) -> dict[str, Any]:
     """
-    Return the full investigation bundle for a case:
-      shipment, assessment, reasons, decision, graph, GenAI explanation, audit.
+    Return the full investigation bundle for a case with in-memory caching (120s TTL).
+    Optional include_graph flag avoids unnecessary graph traversal on pure case views.
     """
+    cache_key = f'case_detail_{case_id}_{include_graph}'
+    return get_cached_case(cache_key, 120.0, lambda: _compute_case_detail(case_id, include_graph=include_graph))
+
+
+def _compute_case_detail(case_id: str, include_graph: bool = False) -> dict[str, Any]:
     case = None
     try:
         uuid.UUID(str(case_id))
         case = FraudCase.objects.select_related(
             'shipment', 'shipment__account', 'shipment__device',
-            'shipment__payment', 'assessment', 'assigned_to'
+            'shipment__payment', 'shipment__origin_address', 'shipment__dest_address',
+            'assessment', 'assigned_to'
         ).filter(case_id=case_id).first()
     except (ValueError, TypeError):
         pass
@@ -108,7 +140,8 @@ def get_case_detail(case_id: str) -> dict[str, Any]:
     if not case:
         case = FraudCase.objects.select_related(
             'shipment', 'shipment__account', 'shipment__device',
-            'shipment__payment', 'assessment', 'assigned_to'
+            'shipment__payment', 'shipment__origin_address', 'shipment__dest_address',
+            'assessment', 'assigned_to'
         ).filter(shipment__booking_ref=case_id).first()
 
     if not case:
@@ -119,7 +152,8 @@ def get_case_detail(case_id: str) -> dict[str, Any]:
                 case = open_case_for_assessment(assessment_obj)
                 case = FraudCase.objects.select_related(
                     'shipment', 'shipment__account', 'shipment__device',
-                    'shipment__payment', 'assessment', 'assigned_to'
+                    'shipment__payment', 'shipment__origin_address', 'shipment__dest_address',
+                    'assessment', 'assigned_to'
                 ).filter(case_id=case.case_id).first()
 
     if not case:
@@ -150,17 +184,28 @@ def get_case_detail(case_id: str) -> dict[str, Any]:
     # GenAI explanation (may be None if not yet generated)
     explanation = get_explanation_for_assessment(str(assessment.assessment_id))
 
-    # Fraud graph (best-effort)
-    try:
-        graph = get_account_graph(str(account.account_id))
-    except Exception as exc:
-        log.warning("Graph unavailable for case %s: %s", case_id, exc)
-        graph = {'error': str(exc)}
+    # Fraud graph (computed only when explicitly requested or already cached)
+    if include_graph:
+        try:
+            graph = get_account_graph(str(account.account_id))
+        except Exception as exc:
+            log.warning("Graph unavailable for case %s: %s", case_id, exc)
+            graph = {'error': str(exc)}
+    else:
+        graph = {
+            'account_id': str(account.account_id),
+            'node_count': 0,
+            'edge_count': 0,
+            'nodes': [],
+            'edges': [],
+        }
 
     # Audit trail
     audit_events = audit_service.get_shipment_timeline(str(shipment.shipment_id))
 
-    audit_service.log_event(
+    # Non-blocking async audit log
+    _case_pool.submit(
+        audit_service.log_event,
         action=audit_service.DATA_VIEWED,
         entity_type='FRAUD_CASE',
         entity_id=case.case_id,
@@ -229,20 +274,39 @@ def get_case_detail(case_id: str) -> dict[str, Any]:
         'audit': audit_events,
     }
 
+    # Cross-populate cache with both identifiers so UUID or booking_ref lookups hit memory
+    now = time.time()
+    _CASE_CACHE[f'case_detail_{case.case_id}_{include_graph}'] = (now, result)
+    if shipment and shipment.booking_ref:
+        _CASE_CACHE[f'case_detail_{shipment.booking_ref}_{include_graph}'] = (now, result)
+
+    return result
+
 
 def list_cases(status: str | None = None, page: int = 1, page_size: int = 20) -> dict[str, Any]:
-    """List cases with optional status filter."""
+    """List cases with optional status filter and 120s TTL cache."""
+    cache_key = f"cases_{status}_{page}_{page_size}"
+    now = time.time()
+    if cache_key in _CASE_LIST_CACHE:
+        cached_time, cached_val = _CASE_LIST_CACHE[cache_key]
+        if now - cached_time < 120.0:
+            return cached_val
+
     qs = FraudCase.objects.select_related('shipment', 'account', 'assessment').order_by(
         '-opened_at'
     )
     if status:
         qs = qs.filter(status=status)
 
-    total = qs.count()
     offset = (page - 1) * page_size
-    cases = qs[offset: offset + page_size]
+    cases = list(qs[offset: offset + page_size])
 
-    return {
+    if page == 1 and len(cases) < page_size:
+        total = len(cases)
+    else:
+        total = qs.count()
+
+    result = {
         'total': total,
         'page': page,
         'page_size': page_size,
@@ -263,6 +327,8 @@ def list_cases(status: str | None = None, page: int = 1, page_size: int = 20) ->
             for c in cases
         ],
     }
+    _CASE_LIST_CACHE[cache_key] = (now, result)
+    return result
 
 
 # ─── Case assignment ──────────────────────────────────────────────────────────
@@ -287,6 +353,7 @@ def assign_case(case_id: str, staff_user_id: str) -> FraudCase:
         before_state={'assigned_to': prev_assignee},
         after_state={'assigned_to': str(analyst.staff_id), 'status': case.status},
     )
+    invalidate_case_cache(str(case_id))
     return case
 
 
@@ -392,6 +459,7 @@ def record_analyst_decision(
         after_state={'verdict': verdict, 'feedback_id': str(feedback.feedback_id)},
     )
 
+    invalidate_case_cache(str(case_id))
     return case, analyst_decision, feedback
 
 
@@ -414,3 +482,32 @@ def close_case(case_id: str, staff_user_id: str, notes: str = '') -> FraudCase:
         after_state={'status': 'CLOSED', 'notes': notes},
     )
     return case
+
+
+def warm_cases_cache():
+    """Warm cases list, top cases, and network graphs in cache on server startup."""
+    try:
+        log.info("[CACHE] Warming cases and graph cache...")
+        res = list_cases()
+        if res and res.get('results'):
+            for item in res['results'][:8]:
+                ref = item.get('booking_ref') or item.get('case_id')
+                if ref:
+                    try:
+                        get_case_detail(ref, include_graph=False)
+                    except Exception:
+                        pass
+
+        # Warm default cluster graphs for Fraud Graph page
+        for acc in [
+            '3515fce9-6616-4ef0-9074-fcacea953083',
+            '68ebcbad-2690-44fa-9c8c-e1863b1fe355',
+            '86f82aa8-4f2a-4588-ac76-b63ccc6ac41c',
+        ]:
+            try:
+                get_account_graph(acc)
+            except Exception:
+                pass
+        log.info("[CACHE] Cases and graph cache warmed successfully.")
+    except Exception as exc:
+        log.warning("[CACHE] Cases/graph cache warming error: %s", exc)

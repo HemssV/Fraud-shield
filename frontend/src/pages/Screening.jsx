@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { 
@@ -21,7 +21,7 @@ const PRESETS = [
       origin: 'Chennai',
       destination: 'Delhi',
       weight: 12.5,
-      service_type: 'STANDARD',
+      service_type: 'GROUND',
       payment_id: 'P19',
       device_id: 'D88',
       package_count: 1,
@@ -89,6 +89,38 @@ export default function Screening() {
   const [activePipelineStep, setActivePipelineStep] = useState(0);
   const [assessmentResult, setAssessmentResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  /** @type {'live' | 'simulated' | null} */
+  const [resultSource, setResultSource] = useState(null);
+  const pipelineTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (pipelineTimerRef.current) clearInterval(pipelineTimerRef.current);
+    };
+  }, []);
+
+  const startPipelineAnimation = () => {
+    if (pipelineTimerRef.current) clearInterval(pipelineTimerRef.current);
+    setActivePipelineStep(1);
+    pipelineTimerRef.current = setInterval(() => {
+      setActivePipelineStep((prev) => (prev >= 4 ? 4 : prev + 1));
+    }, 450);
+  };
+
+  const stopPipelineAnimation = () => {
+    if (pipelineTimerRef.current) {
+      clearInterval(pipelineTimerRef.current);
+      pipelineTimerRef.current = null;
+    }
+    setActivePipelineStep(5);
+  };
+
+  const clearResult = () => {
+    setAssessmentResult(null);
+    setResultSource(null);
+    setErrorMsg(null);
+    setActivePipelineStep(0);
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -106,8 +138,66 @@ export default function Screening() {
       device_id: preset.data.device_id,
       package_count: String(preset.data.package_count),
     });
-    setAssessmentResult(null);
-    setErrorMsg(null);
+    clearResult();
+  };
+
+  const buildSimulatedResult = (payload) => {
+    const simulatedWeight = parseFloat(formData.weight) || 10;
+    const isHigh = simulatedWeight > 100 || formData.shipper_id === 'S4004' || formData.destination.toLowerCase() === 'kabul';
+    const isMed = simulatedWeight > 40;
+
+    const score = isHigh ? 88 : (isMed ? 58 : 24);
+    const level = isHigh ? 'CRITICAL' : (isMed ? 'HIGH' : 'LOW');
+    const action = isHigh ? 'BLOCK' : (isMed ? 'REVIEW' : 'ALLOW');
+
+    return {
+      booking: {
+        shipment_id: `SH${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+        ...payload,
+        status: isHigh ? 'BLOCKED' : (isMed ? 'HELD' : 'ALLOWED'),
+        created_at: new Date().toISOString(),
+      },
+      fraud_assessment: {
+        risk: {
+          risk_score: score,
+          risk_level: level,
+          fraud_probability: score / 100,
+        },
+        decision: {
+          action,
+          reason: isHigh
+            ? 'Severe risk detected: High-risk route & profile anomaly'
+            : (isMed ? 'Elevated weight anomaly requires analyst review' : 'Routine shipment passed all baseline checks'),
+        },
+        signals: {
+          behavioral: isHigh ? 45 : (isMed ? 25 : 5),
+          identity: isHigh ? 35 : (isMed ? 20 : 8),
+          payment: isHigh ? 28 : (isMed ? 15 : 6),
+          device: isHigh ? 30 : (isMed ? 12 : 4),
+          address: isHigh ? 40 : (isMed ? 18 : 2),
+          velocity: isHigh ? 22 : 0,
+        },
+        top_reasons: isHigh ? [
+          `Shipment weight of ${simulatedWeight}kg significantly deviates from baseline`,
+          'Destination is classified as an elevated-risk routing tier',
+          'Device fingerprint has shared linkages to previously flagged entities',
+        ] : (isMed ? [
+          'Weight ratio exceeds 2.5x the account historical average',
+          'Payment method registered recently without settled history',
+        ] : [
+          'Shipper account in good standing with established velocity',
+          'Device fingerprint matches primary recognized terminal',
+        ]),
+        component_scores: {
+          rule_score: isHigh ? 85 : (isMed ? 62 : 20),
+          ml_score: isHigh ? 89 : (isMed ? 54 : 26),
+          device_risk_score: isHigh ? 75 : 30,
+          address_confidence: isHigh ? 0.45 : 0.92,
+        },
+        model: { model_version: 'offline-simulation', rules_version: 'n/a' },
+        pipeline: { total_latency_ms: 185 },
+      },
+    };
   };
 
   const handleSubmit = async (e) => {
@@ -115,7 +205,8 @@ export default function Screening() {
     setIsScreening(true);
     setErrorMsg(null);
     setAssessmentResult(null);
-    setActivePipelineStep(2);
+    setResultSource(null);
+    startPipelineAnimation();
 
     const payload = {
       shipper_id: formData.shipper_id.trim(),
@@ -130,76 +221,36 @@ export default function Screening() {
     };
 
     try {
-      setActivePipelineStep(3);
       const data = await api.screenShipment(payload);
-      setActivePipelineStep(5);
+      stopPipelineAnimation();
       setAssessmentResult(data);
+      setResultSource('live');
       setIsScreening(false);
     } catch (err) {
-      setIsScreening(false);
-      console.warn('Backend call failed, using graceful simulation:', err);
+      const status = err.response?.status;
+      const apiMessage =
+        err.response?.data?.error?.message ||
+        err.response?.data?.message ||
+        err.message;
 
-      // ─── [HARDCODED DATA / CLIENT SIMULATION FALLBACK] ─────────────────────────
-      // If the Node.js backend (:3000) is temporarily down, this fallback ensures
-      // the interactive UI and visualizations remain testable during presentations.
-      const simulatedWeight = parseFloat(formData.weight) || 10;
-      const isHigh = simulatedWeight > 100 || formData.shipper_id === 'S4004' || formData.destination.toLowerCase() === 'kabul';
-      const isMed = simulatedWeight > 40;
-      
-      const score = isHigh ? 88 : (isMed ? 58 : 24);
-      const level = isHigh ? 'CRITICAL' : (isMed ? 'HIGH' : 'LOW');
-      const action = isHigh ? 'BLOCK' : (isMed ? 'REVIEW' : 'ALLOW');
+      // Validation / client errors: show message — do not mask with demo data
+      if (status && status >= 400 && status < 500) {
+        stopPipelineAnimation();
+        setActivePipelineStep(0);
+        setErrorMsg(apiMessage || 'Request rejected by the screening API. Check your inputs.');
+        setIsScreening(false);
+        console.error('Screening validation failed:', apiMessage);
+        return;
+      }
+
+      console.warn('Backend unreachable — using offline simulation:', err);
+      setErrorMsg('Node screening API unavailable — showing offline demo scores only.');
 
       setTimeout(() => {
-        setAssessmentResult({
-          booking: {
-            shipment_id: `SH${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-            ...payload,
-            status: isHigh ? 'BLOCKED' : (isMed ? 'HELD' : 'ALLOWED'),
-            created_at: new Date().toISOString()
-          },
-          fraud_assessment: {
-            risk: {
-              risk_score: score,
-              risk_level: level,
-              fraud_probability: score / 100
-            },
-            decision: {
-              action: action,
-              reason: isHigh 
-                ? 'Severe risk detected: High-risk route & profile anomaly' 
-                : (isMed ? 'Elevated weight anomaly requires analyst review' : 'Routine shipment passed all baseline checks')
-            },
-            signals: {
-              behavioral: isHigh ? 45 : (isMed ? 25 : 5),
-              identity: isHigh ? 35 : (isMed ? 20 : 8),
-              payment: isHigh ? 28 : (isMed ? 15 : 6),
-              device: isHigh ? 30 : (isMed ? 12 : 4),
-              address: isHigh ? 40 : (isMed ? 18 : 2),
-              velocity: isHigh ? 22 : 0
-            },
-            top_reasons: isHigh ? [
-              `Shipment weight of ${simulatedWeight}kg significantly deviates from baseline`,
-              'Destination is classified as an elevated-risk routing tier',
-              'Device fingerprint has shared linkages to previously flagged entities'
-            ] : (isMed ? [
-              'Weight ratio exceeds 2.5x the account historical average',
-              'Payment method registered recently without settled history'
-            ] : [
-              'Shipper account in good standing with established velocity',
-              'Device fingerprint matches primary recognized terminal'
-            ]),
-            component_scores: {
-              rule_score: isHigh ? 85 : (isMed ? 62 : 20),
-              ml_score: isHigh ? 89 : (isMed ? 54 : 26),
-              device_risk_score: isHigh ? 75 : 30,
-              address_confidence: isHigh ? 0.45 : 0.92
-            },
-            pipeline: {
-              total_latency_ms: 185
-            }
-          }
-        });
+        stopPipelineAnimation();
+        setAssessmentResult(buildSimulatedResult(payload));
+        setResultSource('simulated');
+        setIsScreening(false);
       }, 800);
     }
   };
@@ -345,10 +396,11 @@ export default function Screening() {
                     onChange={handleInputChange}
                     className="w-full bg-[rgba(20,20,20,0.8)] border border-[rgba(234,179,8,0.25)] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FDE047] transition-colors"
                   >
+                    <option value="GROUND">GROUND (Surface)</option>
                     <option value="EXPRESS">EXPRESS (Priority Air)</option>
-                    <option value="STANDARD">STANDARD (Surface Ground)</option>
-                    <option value="OVERNIGHT">OVERNIGHT (Next Day Guaranteed)</option>
-                    <option value="ECONOMY">ECONOMY (Bulk Freight)</option>
+                    <option value="EXPRESS_SAVER">EXPRESS SAVER</option>
+                    <option value="FREIGHT">FREIGHT (Bulk)</option>
+                    <option value="INTERNATIONAL">INTERNATIONAL</option>
                   </select>
                 </div>
               </div>
@@ -460,6 +512,12 @@ export default function Screening() {
                 </div>
               </div>
 
+              {errorMsg && (
+                <div className="p-3.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-xs text-rose-200">
+                  {errorMsg}
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="pt-4 flex items-center gap-3">
                 <button
@@ -483,10 +541,7 @@ export default function Screening() {
                 {assessmentResult && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setAssessmentResult(null);
-                      setSelectedPreset(null);
-                    }}
+                    onClick={clearResult}
                     className="btn-secondary py-3 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold text-zinc-300 hover:text-white cursor-pointer"
                     title="Clear current result and screen another"
                   >
@@ -574,6 +629,22 @@ export default function Screening() {
                         <div className="text-xl font-black text-white tracking-wider tabular-nums">
                           {assessmentResult.booking?.shipment_id || 'SH-PENDING'}
                         </div>
+                        {resultSource === 'live' && assessmentResult.fraud_assessment?.model?.model_version && (
+                          <div className="mt-1.5 inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-400/90">
+                            <Cpu size={11} />
+                            <span>
+                              Live pipeline · ML {assessmentResult.fraud_assessment.model.model_version}
+                              {assessmentResult.fraud_assessment.pipeline?.ml_scoring_ms != null
+                                ? ` · ${assessmentResult.fraud_assessment.pipeline.ml_scoring_ms}ms`
+                                : ''}
+                            </span>
+                          </div>
+                        )}
+                        {resultSource === 'simulated' && (
+                          <div className="mt-1.5 text-[10px] font-medium text-amber-400/90">
+                            Offline demo mode — start Node (:3000) and ML (:8001) for real scores
+                          </div>
+                        )}
                       </div>
 
                       <div className={`px-4 py-1.5 rounded-full border text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${meta.badgeClass}`}>
@@ -664,10 +735,7 @@ export default function Screening() {
                     <div className="mt-5 pt-4 border-t border-[rgba(255,255,255,0.08)] flex flex-wrap items-center justify-between gap-3">
                       <button
                         type="button"
-                        onClick={() => {
-                          setAssessmentResult(null);
-                          setSelectedPreset(null);
-                        }}
+                        onClick={clearResult}
                         className="btn-secondary py-2 px-3.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-zinc-300 hover:text-white cursor-pointer"
                       >
                         <RotateCcw size={14} />
@@ -765,10 +833,24 @@ export default function Screening() {
             /* Live Screening Console Ready Card */
             <div className="glass-panel p-8 sm:p-10 border border-[rgba(234,179,8,0.2)] text-center flex flex-col items-center justify-center min-h-[440px] relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none"></div>
-              
+
               <div className="w-16 h-16 rounded-2xl bg-[rgba(234,179,8,0.08)] border border-[rgba(234,179,8,0.2)] flex items-center justify-center text-[#EAB308] mb-4 shadow-[0_0_25px_rgba(234,179,8,0.15)]">
                 <ShieldCheck size={32} />
               </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Ready to Screen</h3>
+              <p className="text-sm text-secondary max-w-md leading-relaxed">
+                Submit booking details on the left to run the full rules + XGBoost pipeline against Node (
+                <span className="font-mono text-zinc-400">:3000</span>
+                ) and the ML microservice (
+                <span className="font-mono text-zinc-400">:8001</span>
+                ). Use demo scenarios for known high- and low-risk profiles.
+              </p>
+              {isScreening && (
+                <p className="mt-6 text-xs text-[#FDE047] flex items-center gap-2 animate-pulse">
+                  <RefreshCw size={14} className="animate-spin" />
+                  Running pipeline stages…
+                </p>
+              )}
             </div>
           )}
         </div>

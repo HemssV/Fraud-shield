@@ -157,7 +157,8 @@ class CaseDetailView(APIView):
     """
 
     def get(self, request, case_id):
-        detail = get_case_detail(case_id)
+        include_graph = request.query_params.get('include_graph', 'false').lower() in ('1', 'true', 'yes')
+        detail = get_case_detail(case_id, include_graph=include_graph)
         return Response(detail)
 
 

@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "ml": "python -m uvicorn ml.service.app:app --host 0.0.0.0 --port 8001",
+    "ml:dev": "python -m uvicorn ml.service.app:app --host 0.0.0.0 --port 8001 --reload",
     "test": "jest"
   },
   "keywords": [],

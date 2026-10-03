@@ -123,9 +123,11 @@ def _mock_explanation(assessment: RiskAssessment, evidence: dict) -> dict[str, A
 
 def _call_gemini(evidence: dict) -> dict[str, Any]:
     """Call the Gemini API and return the parsed explanation."""
-    import google.generativeai as genai  # lazy import
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-    model = genai.GenerativeModel(settings.GEMINI_MODEL)
+    from google import genai  # lazy import — new SDK
+    from google.genai import types
+
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    model_name = getattr(settings, 'GEMINI_MODEL', 'gemini-2.0-flash')
 
     prompt = (
         SYSTEM_INSTRUCTIONS.strip()
@@ -133,7 +135,10 @@ def _call_gemini(evidence: dict) -> dict[str, Any]:
         + json.dumps(evidence, indent=2, default=str)
     )
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model=model_name,
+        contents=prompt,
+    )
     raw_text = response.text.strip()
 
     # Strip markdown code fences if present

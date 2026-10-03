@@ -7,8 +7,14 @@ class IntelligenceConfig(AppConfig):
     verbose_name = 'FraudShield — Intelligence & Operations'
 
     def ready(self):
-        """Warm the dashboard cache in a background thread on startup."""
+        """Warm dashboard, cases, and fraud graph caches in background threads on startup."""
         import threading
         from intelligence.services.analytics_service import warm_dashboard_cache
-        t = threading.Thread(target=warm_dashboard_cache, daemon=True)
+        from intelligence.services.case_service import warm_cases_cache
+
+        def _warm_all():
+            warm_dashboard_cache()
+            warm_cases_cache()
+
+        t = threading.Thread(target=_warm_all, daemon=True)
         t.start()

@@ -7,7 +7,10 @@ import {
   RefreshCw, Info, ExternalLink, Filter, Layers, Zap, X, Eye, ArrowRight, User
 } from 'lucide-react';
 
-// Preset Cluster Data for Immediate Visual Demo and Fallback Resilience
+// ─── [HARDCODED DATA / DEMO PRESET CLUSTERS] ─────────────────────────────
+// Preset cluster topologies for immediate visual demonstration of fraud rings
+// and account takeover topologies, used when exploring preset demos or if the
+// graph API is unreachable.
 const PRESET_CLUSTERS = [
   {
     id: 'ring-alpha',

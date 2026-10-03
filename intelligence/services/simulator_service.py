@@ -589,8 +589,9 @@ def _build_result(
     }
 
 
-# ─── Dispatcher ───────────────────────────────────────────────────────────────
-
+# ─── [HARDCODED DATA / SCENARIO DISPATCHER] ─────────────────────────────────
+# 7 named pre-configured attack vector and baseline scenarios used for
+# reproducible presentations, pipeline testing, and simulator runs.
 _SCENARIO_MAP = {
     SimScenario.NORMAL:               _run_normal,
     SimScenario.ACCOUNT_TAKEOVER:     _run_account_takeover,

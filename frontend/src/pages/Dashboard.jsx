@@ -15,6 +15,11 @@ const RISK_COLORS = {
   LOW: '#22C55E'
 };
 
+// ─── [HARDCODED DATA / MOCK FALLBACK] ─────────────────────────────────────────
+// The following mock datasets are graceful UI fallbacks used ONLY when the
+// live Django endpoints (/api/v1/dashboard/*) are unreachable or return empty sets.
+// When the backend is online, real database data dynamically replaces these values.
+
 const STAT_MOCKS = {
   shipments_screened: 1842,
   high_risk: 73,

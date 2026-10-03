@@ -88,10 +88,11 @@ def _build_evidence_payload(assessment: RiskAssessment) -> dict[str, Any]:
     return payload
 
 
+# ─── [HARDCODED DATA / GENAI DETERMINISTIC FALLBACK] ────────────────────────
 def _mock_explanation(assessment: RiskAssessment, evidence: dict) -> dict[str, Any]:
     """
     Deterministic fallback explanation built from stored risk reasons.
-    Used when USE_MOCK_GENAI=true or when the API call fails.
+    Used when USE_MOCK_GENAI=true or when the Gemini API key is unset or fails.
     """
     reasons = evidence.get('risk_reasons', [])
     reason_texts = [r['description'] for r in reasons if r.get('description')]

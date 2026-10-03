@@ -1,13 +1,10 @@
-// src/services/mockData.js
-//
-// Centralized mock data store that provides the "Shipper Digital Twin"
-// and all upstream service responses. In production, these would be
-// replaced by calls to real account, payment, and fraud-signal systems.
-//
-// The mock data is designed to demonstrate multi-signal fraud detection:
-//   Account + Payment + Device + Address → Signal Fusion → Risk Score
-
-// ─── ACCOUNTS (Shipper Digital Twins) ────────────────────────────────
+// ─── [HARDCODED DATA / UPSTREAM SIGNAL MOCKS] ──────────────────────────────
+// Centralized mock data store that simulates upstream carrier services:
+// (1) Shipper Accounts / Digital Twins (accounts)
+// (2) Payment Card Intelligence (payments)
+// (3) Device & IP Threat Signals (fraudSignals)
+// (4) Geocoding & Address Confidence (addressConfidence)
+// In production, these adapters query live ERP, Payment Gateway, and IP APIs.
 
 const accounts = {
   // ── Legitimate high-volume business shipper ──

@@ -7,6 +7,9 @@ import {
   Zap, Clock, Package, MapPin, CreditCard, Laptop, Sparkles, Send, RotateCcw
 } from 'lucide-react';
 
+// ─── [HARDCODED DATA / DEMO PRESETS] ─────────────────────────────────────────
+// Preset booking payloads provided for rapid testing and hackathon demo evaluation.
+// Users can click these or type custom inputs into the screening form.
 const PRESETS = [
   {
     name: 'Normal Standard Shipment',
@@ -136,7 +139,9 @@ export default function Screening() {
       setIsScreening(false);
       console.warn('Backend call failed, using graceful simulation:', err);
 
-      // Graceful fallback simulation so the user can always evaluate the UX
+      // ─── [HARDCODED DATA / CLIENT SIMULATION FALLBACK] ─────────────────────────
+      // If the Node.js backend (:3000) is temporarily down, this fallback ensures
+      // the interactive UI and visualizations remain testable during presentations.
       const simulatedWeight = parseFloat(formData.weight) || 10;
       const isHigh = simulatedWeight > 100 || formData.shipper_id === 'S4004' || formData.destination.toLowerCase() === 'kabul';
       const isMed = simulatedWeight > 40;

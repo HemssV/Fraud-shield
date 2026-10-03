@@ -3,16 +3,18 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 
+const logger = require('../utils/logger');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
-  max: 10,
+  max: parseInt(process.env.DB_POOL_MAX || '20', 10),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  maxUses: 7500, // Close connection and open new one after 7500 queries
 });
 
 pool.on('error', (err) => {
-  console.error('Unexpected DB pool error:', err.message);
+  logger.error('Unexpected DB pool error', { error: err.message, stack: err.stack });
 });
 
 /**

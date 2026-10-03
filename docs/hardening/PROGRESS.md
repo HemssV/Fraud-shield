@@ -19,11 +19,11 @@
 - [x] 2.3 Structured errors (Status: DONE)
 
 ## PHASE 3: DATABASE AND INFRASTRUCTURE
-- [ ] 3.1 Pool config (Status: NOT STARTED)
-- [ ] 3.2 Audit log migration (Status: NOT STARTED)
-- [ ] 3.3 Health/ready checks (Status: NOT STARTED)
-- [ ] 3.4 Security basics (Status: NOT STARTED)
-- [ ] 3.5 Structured logging (Status: NOT STARTED)
+- [x] 3.1 Pool config (Status: DONE)
+- [x] 3.2 Audit log migration (Status: DONE)
+- [x] 3.3 Health/ready checks (Status: DONE)
+- [x] 3.4 Security basics (Status: DONE)
+- [x] 3.5 Structured logging (Status: DONE)
 
 ## PHASE 4: ML SERVICE AND TRAINING
 - [ ] 4.1 Synthetic training data (Status: NOT STARTED)

@@ -21,6 +21,8 @@ const logger = require('./utils/logger');
 const requestLogger = require('./middleware/requestLogger');
 const { errorHandler } = require('./middleware/errorHandler');
 const db = require('./db/index');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 // Route imports
 const healthRoutes = require('./api/health');
@@ -37,8 +39,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── Middleware ────────────────────────────────────────────────────────────
+app.use(helmet());
 app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', apiLimiter);
 
 // CORS — allow all origins in dev; restrict in production
 app.use((req, res, next) => {

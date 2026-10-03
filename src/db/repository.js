@@ -11,6 +11,7 @@
 //   fraud_cases, entity_links, audit_log
 
 const db = require('./index');
+const logger = require('../utils/logger');
 
 // ─── SHIPPER / ACCOUNT ─────────────────────────────────────────────────────
 
@@ -515,7 +516,7 @@ async function logAuditEvent({ action, entity_type, entity_id, shipment_id, acto
     `INSERT INTO audit_log (action, entity_type, entity_id, shipment_id, actor_type, after_state)
      VALUES ($1,$2,$3,$4,$5,$6)`,
     [action, entity_type, entity_id || null, shipment_id || null, actor_type, JSON.stringify(after_state || {})]
-  ).catch(e => console.warn('Audit log write failed:', e.message));
+  ).catch(e => logger.warn('Audit log write failed:', { error: e.message }));
 }
 
 module.exports = {

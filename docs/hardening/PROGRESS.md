@@ -1,7 +1,7 @@
 # Hardening Progress
 
 ## PHASE 0: AUDIT
-- [ ] 0.1 Audit codebase and create AUDIT.md (Status: BLOCKED / NOT STARTED)
+- [x] 0.1 Audit codebase and create AUDIT.md (Status: DONE)
 
 ## PHASE 1: CORRECTNESS BUGS
 - [ ] 1.1 Null safety (Status: NOT STARTED)

@@ -110,6 +110,171 @@ class FraudGraphAccountView(APIView):
         return Response(graph)
 
 
+class FraudGraphClustersView(APIView):
+    """
+    GET /api/v1/fraud-graph/clusters/
+
+    Return all fraud-ring clusters from the database.
+    Each cluster includes: ring metadata, member accounts, shared entities,
+    the full entity-link graph, and risk signals.
+    Used by the frontend Fraud Graph Intelligence page instead of hardcoded data.
+    """
+
+    def get(self, request):
+        from intelligence.models import (
+            FraudRing, FraudRingMember, Account, FraudSignal, EntityLink,
+        )
+        from collections import defaultdict
+        from django.db.models import Q
+
+        # Deduplicate rings — group by sorted account-pair to avoid duplicates
+        all_rings = FraudRing.objects.prefetch_related('members').order_by('-ring_score', '-detected_at')
+        seen_account_sets = set()
+        unique_clusters = []
+
+        for ring in all_rings:
+            member_ids = sorted([str(m.account_id) for m in ring.members.all()])
+            key = tuple(member_ids)
+            if key in seen_account_sets:
+                continue
+            seen_account_sets.add(key)
+
+            # Build the graph for this cluster by aggregating entity links across all member accounts
+            all_entity_ids = list(member_ids)
+            links = EntityLink.objects.filter(
+                Q(src_id__in=all_entity_ids) | Q(dst_id__in=all_entity_ids)
+            )
+
+            nodes_map = {}
+            edges_list = []
+
+            # Add member account nodes first
+            for acct_id in member_ids:
+                acct = Account.objects.filter(account_id=acct_id).first()
+                node_key = f"ACCOUNT:{acct_id}"
+                acct_number = acct.account_number if acct else acct_id[:8]
+                signals = FraudSignal.objects.filter(
+                    entity_type='ACCOUNT', entity_id=acct_id, is_active=True
+                )
+                max_severity = max([s.severity for s in signals], default=0)
+                nodes_map[node_key] = {
+                    'id': node_key,
+                    'entity_type': 'ACCOUNT',
+                    'entity_id': acct_id,
+                    'label': f'Account {acct_number}',
+                    'risk_score': min(max_severity * 10, 100),
+                    'is_suspicious': max_severity >= 5,
+                    'signal_count': signals.count(),
+                }
+
+            for link in links:
+                src_key = f"{link.src_type}:{link.src_id}"
+                dst_key = f"{link.dst_type}:{link.dst_id}"
+
+                if src_key not in nodes_map:
+                    nodes_map[src_key] = {
+                        'id': src_key,
+                        'entity_type': link.src_type,
+                        'entity_id': str(link.src_id),
+                        'label': f'{link.src_type} {str(link.src_id)[:8]}',
+                        'risk_score': 0,
+                        'is_suspicious': False,
+                        'signal_count': 0,
+                    }
+                if dst_key not in nodes_map:
+                    nodes_map[dst_key] = {
+                        'id': dst_key,
+                        'entity_type': link.dst_type,
+                        'entity_id': str(link.dst_id),
+                        'label': f'{link.dst_type} {str(link.dst_id)[:8]}',
+                        'risk_score': 0,
+                        'is_suspicious': False,
+                        'signal_count': 0,
+                    }
+
+                edges_list.append({
+                    'source': src_key,
+                    'target': dst_key,
+                    'link_type': link.link_type,
+                    'weight': link.weight,
+                })
+
+            # Mark shared-entity nodes as suspicious
+            shared_ents = ring.shared_entities or {}
+            for dev_id in shared_ents.get('devices', []):
+                dev_key = f"DEVICE:{dev_id}"
+                if dev_key in nodes_map:
+                    nodes_map[dev_key]['is_suspicious'] = True
+                    nodes_map[dev_key]['risk_score'] = max(nodes_map[dev_key]['risk_score'], 85)
+            for pay_id in shared_ents.get('payments', []):
+                pay_key = f"PAYMENT:{pay_id}"
+                if pay_key in nodes_map:
+                    nodes_map[pay_key]['is_suspicious'] = True
+                    nodes_map[pay_key]['risk_score'] = max(nodes_map[pay_key]['risk_score'], 80)
+
+            # Determine cluster risk level
+            score = float(ring.ring_score)
+            risk_level = 'CRITICAL' if score >= 80 else 'HIGH' if score >= 60 else 'MEDIUM' if score >= 40 else 'LOW'
+
+            unique_clusters.append({
+                'ring_id': str(ring.ring_id),
+                'ring_score': score,
+                'risk_level': risk_level,
+                'shared_entities': shared_ents,
+                'detected_at': ring.detected_at.isoformat() if ring.detected_at else None,
+                'member_account_ids': member_ids,
+                'node_count': len(nodes_map),
+                'edge_count': len(edges_list),
+                'nodes': list(nodes_map.values()),
+                'edges': edges_list,
+            })
+
+            if len(unique_clusters) >= 20:
+                break
+
+        # Also include standalone high-risk accounts (those with signals but no ring membership)
+        ring_account_ids = set()
+        for c in unique_clusters:
+            ring_account_ids.update(c['member_account_ids'])
+
+        standalone_signals = FraudSignal.objects.filter(
+            entity_type='ACCOUNT', is_active=True
+        ).exclude(entity_id__in=ring_account_ids).values_list('entity_id', flat=True).distinct()[:5]
+
+        for acct_id in standalone_signals:
+            acct_id_str = str(acct_id)
+            graph = get_account_graph(acct_id_str)
+            if graph.get('node_count', 0) > 1:
+                unique_clusters.append({
+                    'ring_id': f'standalone-{acct_id_str[:8]}',
+                    'ring_score': 50.0,
+                    'risk_level': 'HIGH',
+                    'shared_entities': {},
+                    'detected_at': None,
+                    'member_account_ids': [acct_id_str],
+                    'node_count': graph['node_count'],
+                    'edge_count': graph['edge_count'],
+                    'nodes': [
+                        {
+                            'id': n['id'],
+                            'entity_type': n['entity_type'],
+                            'entity_id': n['entity_id'],
+                            'label': f"{n['entity_type']} {n['entity_id'][:8]}",
+                            'risk_score': 60 if n['entity_type'] != 'ACCOUNT' else 70,
+                            'is_suspicious': True,
+                            'signal_count': 0,
+                        }
+                        for n in graph['nodes']
+                    ],
+                    'edges': graph['edges'],
+                })
+
+        return Response({
+            'cluster_count': len(unique_clusters),
+            'clusters': unique_clusters,
+        })
+
+
 class FraudRingDetectView(APIView):
     """
     POST /api/v1/fraud-graph/detect-rings/

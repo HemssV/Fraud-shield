@@ -83,6 +83,10 @@ export const api = {
     const response = await djangoClient.post('/fraud-graph/detect-rings/', { min_shared_entities: minSharedEntities });
     return response.data;
   },
+  getFraudGraphClusters: async () => {
+    const response = await djangoClient.get('/fraud-graph/clusters/');
+    return response.data;
+  },
 
   // ─── GENAI EXPLANATION (DJANGO) ─────────────────────────────────────────────
   getFraudExplanation: async (assessmentId) => {

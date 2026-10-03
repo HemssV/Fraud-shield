@@ -13,6 +13,7 @@ urlpatterns = [
 
     # ── Fraud Graph ─────────────────────────────────────────────────────────
     path('fraud-graph/account/<str:account_id>/', views.FraudGraphAccountView.as_view(), name='fraud-graph-account'),
+    path('fraud-graph/clusters/', views.FraudGraphClustersView.as_view(), name='fraud-graph-clusters'),
     path('fraud-graph/detect-rings/', views.FraudRingDetectView.as_view(), name='fraud-graph-detect-rings'),
 
     # ── Cases / Investigation ───────────────────────────────────────────────

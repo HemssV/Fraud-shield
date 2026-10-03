@@ -8,9 +8,7 @@ import {
 } from 'lucide-react';
 
 // ─── [HARDCODED DATA / DEMO PRESET CLUSTERS] ─────────────────────────────
-// Preset cluster topologies for immediate visual demonstration of fraud rings
-// and account takeover topologies, used when exploring preset demos or if the
-// graph API is unreachable.
+// Fallback preset cluster topologies used if the graph API is unreachable.
 const PRESET_CLUSTERS = [
   {
     id: 'ring-alpha',
@@ -80,21 +78,71 @@ const PRESET_CLUSTERS = [
 ];
 
 export default function FraudGraph() {
-  const [selectedClusterId, setSelectedClusterId] = useState('ring-alpha');
+  const [clusters, setClusters] = useState([]);
+  const [selectedClusterId, setSelectedClusterId] = useState(null);
   const graphCacheRef = useRef({});
-  const [graphData, setGraphData] = useState(PRESET_CLUSTERS[0]);
+  const [graphData, setGraphData] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [scanningRings, setScanningRings] = useState(false);
   const [ringDetectionBanner, setRingDetectionBanner] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [filterType, setFilterType] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const currentCluster = PRESET_CLUSTERS.find(c => c.id === selectedClusterId) || PRESET_CLUSTERS[0];
+  // Fetch all clusters on mount
+  const loadClusters = async () => {
+    try {
+      const data = await api.getFraudGraphClusters();
+      if (data && data.clusters && data.clusters.length > 0) {
+        // Map backend cluster format to UI format
+        const formattedClusters = data.clusters.map((c, i) => ({
+          id: c.ring_id,
+          name: c.ring_id.startsWith('standalone') 
+            ? `Standalone High Risk (Acc ${c.member_account_ids[0].slice(0, 4)})`
+            : `Fraud Ring Syndicate ${i+1}`,
+          accountId: c.member_account_ids[0],
+          description: c.ring_id.startsWith('standalone')
+            ? 'Standalone account with severe fraud signals and risk indicators.'
+            : `Detected fraud ring with ${c.member_account_ids.length} accounts sharing devices or payments.`,
+          riskLevel: c.risk_level,
+          nodes: c.nodes.map(n => ({
+             ...n,
+             x: 400 + Math.cos(Math.random() * 2 * Math.PI) * 150,
+             y: 220 + Math.sin(Math.random() * 2 * Math.PI) * 150,
+             status: n.is_suspicious ? 'HIGH_RISK_LINK' : 'ACTIVE',
+             details: `Live PostgreSQL entity: ${n.entity_type} (${n.entity_id})`
+          })),
+          edges: c.edges.map(e => ({
+             ...e,
+             label: e.link_type,
+             isSuspicious: e.weight > 1 || c.risk_level === 'CRITICAL' || c.risk_level === 'HIGH'
+          }))
+        }));
+        setClusters(formattedClusters);
+        if (!selectedClusterId && formattedClusters.length > 0) {
+          setSelectedClusterId(formattedClusters[0].id);
+        }
+      } else {
+        setClusters(PRESET_CLUSTERS);
+        if (!selectedClusterId) setSelectedClusterId(PRESET_CLUSTERS[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load clusters, using fallback:', err);
+      setClusters(PRESET_CLUSTERS);
+      if (!selectedClusterId) setSelectedClusterId(PRESET_CLUSTERS[0].id);
+    }
+  };
 
-  // Fetch or Switch Graph with client cache
   useEffect(() => {
+    loadClusters();
+  }, []);
+
+  const currentCluster = clusters.find(c => c.id === selectedClusterId) || clusters[0];
+
+  // Render graph when selected cluster changes
+  useEffect(() => {
+    if (!currentCluster) return;
     let isMounted = true;
     setSelectedNode(null);
 
@@ -107,83 +155,34 @@ export default function FraudGraph() {
 
     setLoading(true);
 
-    async function loadGraph() {
-      try {
-        const liveData = await api.getFraudGraph(currentCluster.accountId);
-        if (isMounted && liveData && liveData.nodes && liveData.nodes.length > 0) {
-          // Format backend nodes with clean hub-and-spoke layout coordinates
-          const otherNodes = liveData.nodes.filter(n => !(n.entity_type === 'ACCOUNT' && n.entity_id === liveData.account_id));
-          const hasCenter = liveData.nodes.some(n => n.entity_type === 'ACCOUNT' && n.entity_id === liveData.account_id);
-
-          const formattedNodes = liveData.nodes.map((node, i) => {
-            const isCenter = hasCenter && node.entity_type === 'ACCOUNT' && node.entity_id === liveData.account_id;
-            let x = 400;
-            let y = 220;
-
-            if (!isCenter) {
-              const otherIdx = otherNodes.indexOf(node);
-              const totalOthers = Math.max(otherNodes.length, 1);
-              const angle = (otherIdx / totalOthers) * 2 * Math.PI;
-              const radius = 180;
-              x = 400 + Math.cos(angle) * radius;
-              y = 220 + Math.sin(angle) * radius;
-            }
-
-            const isSuspicious = node.entity_type === 'DEVICE' || liveData.risk_signals?.length > 0;
-            const shortId = (node.entity_id || '').slice(0, 6);
-            const label = node.entity_type === 'ACCOUNT' 
-              ? `Account S${shortId}` 
-              : node.entity_type === 'DEVICE' 
-              ? `Device D-${shortId}` 
-              : node.entity_type === 'PAYMENT' 
-              ? `Card ****${shortId.slice(-4)}` 
-              : `${node.entity_type} ${shortId}`;
-
-            return {
-              id: node.id || `NODE-${i}`,
-              label: label,
-              type: node.entity_type || 'ACCOUNT',
-              x,
-              y,
-              isSuspicious: isSuspicious,
-              riskScore: isSuspicious ? 85 : 20,
-              status: isSuspicious ? 'HIGH_RISK_LINK' : 'ACTIVE',
-              details: `Live PostgreSQL entity: ${node.entity_type} (${node.entity_id})`
-            };
-          });
-
-          const formattedEdges = liveData.edges.map(e => ({
-            source: e.source,
-            target: e.target,
-            label: e.link_type || 'LINKED_TO',
-            isSuspicious: e.weight > 1 || currentCluster.riskLevel === 'CRITICAL'
-          }));
-
-          const fullGraph = {
-            ...currentCluster,
-            nodes: formattedNodes,
-            edges: formattedEdges
-          };
-
-          graphCacheRef.current[currentCluster.accountId] = fullGraph;
-          setGraphData(fullGraph);
-          setLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.warn('Backend graph returned fallback preset:', err);
+    // Just use the pre-fetched cluster data instead of fetching a single account graph
+    // since the new clusters API already gives us the fully populated subgraph.
+    setLoading(true);
+    
+    // Distribute nodes visually in a circle
+    const formattedNodes = (currentCluster.nodes || []).map((node, i) => {
+      let x = 400;
+      let y = 220;
+      const totalNodes = Math.max(currentCluster.nodes.length, 1);
+      
+      if (i !== 0) {
+        const angle = (i / totalNodes) * 2 * Math.PI;
+        const radius = 180;
+        x = 400 + Math.cos(angle) * radius;
+        y = 220 + Math.sin(angle) * radius;
       }
+      return { ...node, x, y };
+    });
 
-      if (isMounted) {
-        graphCacheRef.current[currentCluster.accountId] = currentCluster;
-        setGraphData(currentCluster);
-        setLoading(false);
-      }
-    }
-
-    loadGraph();
+    const fullGraph = {
+      ...currentCluster,
+      nodes: formattedNodes
+    };
+    
+    setGraphData(fullGraph);
+    setLoading(false);
     return () => { isMounted = false; };
-  }, [selectedClusterId]);
+  }, [selectedClusterId, currentCluster]);
 
   // Trigger Fraud Ring Scan
   const handleDetectRings = async () => {
@@ -191,21 +190,19 @@ export default function FraudGraph() {
     setRingDetectionBanner(null);
     try {
       const res = await api.detectFraudRings(1);
-      const ringsFound = res.rings_detected || 3;
+      const ringsFound = res.rings_detected || 0;
       setRingDetectionBanner({
         count: ringsFound,
         message: `Graph Scan Complete: ${ringsFound} interconnected syndicates detected sharing devices and payment credentials.`
       });
-      setSelectedClusterId('ring-alpha');
+      // Refresh the clusters list from DB
+      await loadClusters();
     } catch (err) {
       console.warn('Detect rings fallback:', err);
-      setTimeout(() => {
-        setRingDetectionBanner({
-          count: 3,
-          message: 'Graph Scan Complete: 3 interconnected syndicates detected across active shipping telemetry.'
-        });
-        setSelectedClusterId('ring-alpha');
-      }, 700);
+      setRingDetectionBanner({
+        count: 0,
+        message: 'Graph Scan Failed. Using existing clusters.'
+      });
     } finally {
       setScanningRings(false);
     }
@@ -247,7 +244,7 @@ export default function FraudGraph() {
   };
 
   // Filter nodes
-  const filteredNodes = (graphData.nodes || []).filter(node => {
+  const filteredNodes = (graphData?.nodes || []).filter(node => {
     if (filterType !== 'ALL' && node.type !== filterType) return false;
     if (searchQuery.trim() && !node.label.toLowerCase().includes(searchQuery.toLowerCase()) && !node.id.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
@@ -317,19 +314,19 @@ export default function FraudGraph() {
       {/* Cluster Selector Tabs & Toolbar */}
       <div className="mb-6 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
         {/* Cluster Tabs */}
-        <div className="md:col-span-8 flex flex-wrap gap-2">
-          {PRESET_CLUSTERS.map((cluster) => (
+        <div className="md:col-span-8 flex flex-wrap gap-2 overflow-x-auto pb-2">
+          {clusters.slice(0, 8).map((cluster) => (
             <button
               key={cluster.id}
               type="button"
               onClick={() => setSelectedClusterId(cluster.id)}
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
                 selectedClusterId === cluster.id
                   ? 'bg-[#EAB308] text-black shadow-[0_0_10px_rgba(234,179,8,0.4)] font-bold'
                   : 'bg-[rgba(20,20,20,0.6)] text-zinc-400 hover:text-white border border-[rgba(234,179,8,0.15)]'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${
+              <span className={`w-2 h-2 rounded-full shrink-0 ${
                 cluster.riskLevel === 'CRITICAL' ? 'bg-red-500' :
                 cluster.riskLevel === 'HIGH' ? 'bg-amber-500' : 'bg-emerald-500'
               }`}></span>
@@ -434,9 +431,9 @@ export default function FraudGraph() {
                   </defs>
 
                   {/* Render Edges */}
-                  {(graphData.edges || []).map((edge, idx) => {
-                    const sourceNode = graphData.nodes?.find(n => n.id === edge.source);
-                    const targetNode = graphData.nodes?.find(n => n.id === edge.target);
+                  {(graphData?.edges || []).map((edge, idx) => {
+                    const sourceNode = graphData?.nodes?.find(n => n.id === edge.source);
+                    const targetNode = graphData?.nodes?.find(n => n.id === edge.target);
                     if (!sourceNode || !targetNode) return null;
 
                     return (
@@ -641,18 +638,20 @@ export default function FraudGraph() {
             )}
 
             {/* Cluster overview footer */}
-            <div className="mt-6 pt-4 border-t border-[rgba(234,179,8,0.12)]">
-              <span className="text-[10px] font-semibold text-secondary uppercase tracking-wider block mb-2">
-                Active Cluster Synopsis
-              </span>
-              <p className="text-xs text-zinc-400 leading-relaxed mb-3">
-                {currentCluster.description}
-              </p>
-              <div className="flex items-center justify-between text-xs text-zinc-500">
-                <span>Total Entities: <strong>{graphData.nodes?.length || 0}</strong></span>
-                <span>Active Edges: <strong>{graphData.edges?.length || 0}</strong></span>
+            {currentCluster && (
+              <div className="mt-6 pt-4 border-t border-[rgba(234,179,8,0.12)]">
+                <span className="text-[10px] font-semibold text-secondary uppercase tracking-wider block mb-2">
+                  Active Cluster Synopsis
+                </span>
+                <p className="text-xs text-zinc-400 leading-relaxed mb-3">
+                  {currentCluster.description}
+                </p>
+                <div className="flex items-center justify-between text-xs text-zinc-500">
+                  <span>Total Entities: <strong>{graphData?.nodes?.length || 0}</strong></span>
+                  <span>Active Edges: <strong>{graphData?.edges?.length || 0}</strong></span>
+                </div>
               </div>
-            </div>
+            )}
 
           </div>
         </div>

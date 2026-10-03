@@ -117,7 +117,8 @@ async function screenShipment(booking) {
           after_state: { 
             risk_score: aggregatedRisk.risk_score, 
             action: decision.action,
-            missing_entities: features._meta.missing_entities
+            missing_entities: features._meta.missing_entities,
+            departure_in_past: features.behavioral.departure_in_past
           },
         }),
       ];

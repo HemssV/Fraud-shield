@@ -102,6 +102,23 @@ function generateBehavioralFeatures(booking, account) {
     ? (booking.package_count || 1) / profile.avg_shipments_per_day
     : 1;
 
+  // 1.2 Time math
+  let days_until_departure = 14; // Default to 14 days
+  let departure_in_past = false;
+  if (booking.departure_date) {
+    const depDate = new Date(booking.departure_date);
+    if (!isNaN(depDate.valueOf())) {
+      days_until_departure = Math.floor((depDate - new Date()) / 86400000);
+      if (days_until_departure < 0) {
+        departure_in_past = true;
+        days_until_departure = 0;
+      }
+      if (days_until_departure > 365) {
+        days_until_departure = 365;
+      }
+    }
+  }
+
   return {
     weight_z_score: Math.round(weightZScore * 100) / 100,
     weight_ratio_to_avg: Math.round(weightRatio * 100) / 100,
@@ -114,6 +131,8 @@ function generateBehavioralFeatures(booking, account) {
     package_count_ratio: Math.round(packageCountRatio * 100) / 100,
     total_historical_shipments: profile.total_shipments || 0,
     is_low_history: (profile.total_shipments || 0) < 10,
+    days_until_departure,
+    departure_in_past,
   };
 }
 

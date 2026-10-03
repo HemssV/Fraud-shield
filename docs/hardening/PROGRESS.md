@@ -5,7 +5,7 @@
 
 ## PHASE 1: CORRECTNESS BUGS
 - [x] 1.1 Null safety (Status: DONE)
-- [ ] 1.2 Time math (Status: NOT STARTED)
+- [x] 1.2 Time math (Status: DONE)
 - [ ] 1.3 Route entropy (Status: NOT STARTED)
 - [ ] 1.4 Velocity z-scores (Status: NOT STARTED)
 - [ ] 1.5 Feature bounds and clipping (Status: NOT STARTED)

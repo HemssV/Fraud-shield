@@ -1,8 +1,8 @@
 # FraudShield Architecture & System Summary
 
-Welcome to **FraudShield**, an enterprise-grade, hybrid real-time fraud detection and risk assessment platform designed specifically for high-velocity travel & booking systems. 
+Welcome to **FraudShield**, an enterprise-grade, hybrid real-time fraud detection and risk assessment platform designed specifically for high-velocity travel & booking systems.
 
-This document serves as the complete, authoritative guide to understanding **everything** happening inside FraudShield—from architecture, microservices, and database models to feature engineering, rule mechanics, machine learning pipelines, and AI copilot integrations.
+This document serves as the complete, authoritative guide to understanding **everything** happening inside FraudShield—from architecture, microservices, and database models to feature engineering, rule mechanics, machine learning pipelines, and AI copilot integrations. It includes recent system hardening and correctness fixes applied to Phase 1.
 
 ---
 
@@ -13,7 +13,7 @@ This document serves as the complete, authoritative guide to understanding **eve
 4. [Mathematical & Scoring Framework](#-mathematical--scoring-framework)
 5. [ML Model & Feature Engineering Pipeline](#-ml-model--feature-engineering-pipeline)
 6. [GenAI Copilot Integration](#-genai-copilot-integration)
-7. [Database Schema & Fallback Mechanics](#-database-schema--fallback-mechanics)
+7. [Database Schema & Hardening Mechanics](#-database-schema--hardening-mechanics)
 8. [Setup & Running Locally](#-setup--running-locally)
 
 ---
@@ -47,7 +47,7 @@ FraudShield employs a **multi-tier microservice architecture** separating high-s
               |
               v
 +-------------------------------------------------------------------+
-|               Neon PostgreSQL / Mock Data Layer                   |
+|               Neon PostgreSQL Database                            |
 +-------------------------------------------------------------------+
 ```
 
@@ -58,88 +58,81 @@ FraudShield employs a **multi-tier microservice architecture** separating high-s
 | Component | Tech Stack | Port | Core Responsibilities |
 | :--- | :--- | :--- | :--- |
 | **Frontend UI** | React, Tailwind CSS, Lucide Icons, Vite | `5173` | Fraud Analyst Portal, Live Screening Simulator, Interactive Rule Builder, Visual Graph Analytics, Investigation Workbench. |
-| **Core Screening Engine** | Node.js, Express | `3000` | Sub-100ms real-time booking screening, rule evaluation, z-score velocity calculation, entity profiling, database fallback logic. |
+| **Core Screening Engine** | Node.js, Express | `3000` | Sub-100ms real-time booking screening, rule evaluation, Poisson-style z-score velocity calculation, canonical feature flattening, strict error handling, and advisory locking for concurrent requests. |
 | **Analytics & GenAI Backend** | Python, Django, Django REST Framework | `8000` | Case management, audit logs, analytical dashboards, Gemini 3.8 Flash LLM orchestration, investigation note summaries. |
-| **ML Inference Microservice** | Python, FastAPI, LightGBM, Scikit-Learn | `8001` | Anomaly detection via Isolation Forest, supervised fraud probability scoring via LightGBM model. |
-| **Database Layer** | Neon PostgreSQL (Remote) / `mockData.js` | Cloud / Local | Entity history (Accounts, Payments, Devices, IPs), rules configuration, blacklists, cases. |
+| **ML Inference Microservice** | Python, FastAPI, LightGBM, Scikit-Learn | `8001` | Anomaly detection via Isolation Forest, supervised fraud probability scoring via LightGBM model. Expects a canonical 1D flattened feature vector. |
+| **Database Layer** | Neon PostgreSQL (Remote) | Cloud | Entity history (Accounts, Payments, Devices, IPs), rules configuration, blacklists, cases, and shipment records. |
 
 ---
 
 ## ⚡ End-to-End Real-Time Screening Flow
 
-When a booking request is posted to `POST /api/bookings/screen`, the engine executes an 8-step pipeline:
+When a booking request is posted to `POST /api/fraud/screen`, the engine executes a strict 10-step pipeline:
 
-```
-[Booking Ingestion] 
-       │
-       ▼
-[Entity Upsert & History Lookup] (Account, Payment, Device, IP)
-       │
-       ▼
-[Feature Engineering] (Z-Scores, Velocity Ratios, Route Entropy)
-       │
-       ▼
-[Rule Engine Evaluation] (Deterministic Rules 0 - 100)
-       │
-       ▼
-[ML Inference] ──► (FastAPI LightGBM Probability + Isolation Forest)
-       │
-       ▼
-[Entity Graph Risk] (Risk propagation across shared IPs/Devices)
-       │
-       ▼
-[Risk Aggregation] ──► (40% Rules + 40% ML + 20% Graph)
-       │
-       ▼
-[Final Action Decision] ──► (ALLOW | MONITOR | VERIFY | REVIEW | BLOCK)
-```
+1. **Advisory Locking**: Acquires a Postgres advisory lock on `hashtext(booking_ref)` to prevent concurrent double-writes.
+2. **Entity Lookups (Null Safety)**: Fetches historical entity data (Account, Payment, Device, Address). Throws `EntityNotFoundError` if the Account does not exist (in production mode).
+3. **Velocity Z-Score Computation**: Runs index-backed queries in parallel via `Promise.all` to compute 30-day baseline vs. last 24h metrics for Account, Device, Payment, and IP.
+4. **Feature Engineering**: Calculates weight Z-scores, departure time math, route entropy, and clips unbounded features. Flattens features into a 1D vector and strictly enforces a canonical feature schema.
+5. **Rule Engine Evaluation**: Runs deterministic heuristics on the generated features to produce a `rule_score`.
+6. **ML Inference**: Calls the FastAPI ML service (`/score`). Overridden completely if `rule_score >= 100`.
+7. **Risk Aggregation**: Combines `rule_score`, `ml_score`, and `graph_score` into a single bounded `risk_score` (0-100).
+8. **Decision Engine**: Determines final action (ALLOW, ALLOW_MONITOR, VERIFY, REVIEW, BLOCK) based on hard thresholds (e.g. REVIEW >= 70, BLOCK >= 90).
+9. **Reason & Signal Generation**: Extracts top categorical reasons explaining the decision.
+10. **Persistence**: Saves the full Risk Assessment and releases the advisory lock.
 
 ---
 
 ## 📐 Mathematical & Scoring Framework
 
 ### 1. Final Combined Risk Score Formula
+If `RuleScore >= 100`, bypass ML entirely and set action to `BLOCK` (Risk Score = 100, Fraud Prob = 1.0).
+Otherwise:
 $$\text{Final Risk Score} = \min\left(100, (0.40 \times \text{RuleScore}) + (0.40 \times \text{MLScore}) + (0.20 \times \text{GraphScore})\right)$$
+*Note: Severe signals (like suspended accounts or blacklisted IPs) conditionally raise the minimum final score.*
 
-*(Note: Blacklisted devices/IPs or suspended accounts trigger an automatic override forcing the score to `100` and action to `BLOCK`.)*
+### 2. Velocity Z-Score Formula (Poisson-Style)
+Computed per-entity (Account, IP, Device, Payment) over a 30-day baseline (excluding the last 24h):
+$$\text{Velocity Z-Score} = \frac{\text{Count}_{24h} - \text{BaselineDaily}}{\sqrt{\max(\text{BaselineDaily}, 0.5)}}$$
+*This prevents divide-by-zero explosions for low-activity entities. Z-Scores are rigidly clipped to `[-10, 10]`.*
 
-### 2. Velocity Z-Score Formula
-$$\text{Velocity Z-Score} = \frac{x_{\text{current}} - \mu_{24h}}{\sigma_{24h} + 1e-5}$$
-- Measures deviation in transactional frequency over a rolling 24-hour window for a given IP or User Account.
+### 3. Route Entropy
+Shannon entropy guards against completely novel route combinations (capped at $\log_2(\text{Total Routes})$):
+$$\text{Route Entropy} = -\sum P(route_i) \log_2 P(route_i)$$
+*Empty routes return entropy 0, `is_new_route = true`.*
 
-### 3. Route Entropy (Risk Indexing)
-$$\text{Route Entropy} = -\sum_{i} P(\text{route}_i) \log_2 P(\text{route}_i) + \text{GeographicRiskMultiplier}$$
-- High-risk origin/destination pairs (e.g., sanctioned/high-friction corridors) scale the base rule score by up to 2.5×.
-
-### 4. Graph Propagation Risk Score
-$$\text{Graph Score} = \max_{v \in \text{Neighbors}} \left( \text{Risk}(v) \times d^{-\text{distance}} \right)$$
-- Propagates risk from linked suspended/fraudulent accounts attached to the same device fingerprint or IP subnet.
+### 4. Feature Bounds & Clipping
+To ensure stable ML inference:
+- `weight_z_score`: Clipped to `[-5, 10]`
+- `weight_ratio_to_avg`: Clipped to `[0, 50]`
+- `package_count_ratio`: Clipped to `[0, 20]`
 
 ---
 
 ## 🤖 ML Model & Feature Engineering Pipeline
 
-The FastAPI microservice ([`ml/main.py`](file:///c:/Users/samyu/Desktop/test/fraudshield-backend/ml/main.py)) runs two complementary models in parallel:
+The Node.js engine strictly maps raw data to a 1D vector governed by `src/features/featureSchema.js`. Missing or unexpected features throw immediate errors.
 
-1. **LightGBM Classifier**: Trained on historical chargebacks, velocity spikes, card country vs IP country mismatches, and email domain age. Outputs a calibrated fraud probability $P(\text{Fraud}) \in [0, 1]$.
-2. **Isolation Forest**: Unsupervised anomaly detection model trained on multi-dimensional transaction distributions. Detects novel zero-day fraud attacks.
+The FastAPI microservice (`ml/app.py`) consumes this canonical vector through:
+1. **LightGBM Classifier**: Evaluates the structured array to output a calibrated fraud probability $P(\text{Fraud}) \in [0, 1]$.
+2. **Isolation Forest**: Computes multidimensional anomaly scores to detect novel zero-day behaviors that LightGBM might miss.
 
 ---
 
 ## 🧠 GenAI Copilot Integration
 
-Powered by **Google Gemini 3.8 Flash** via the official Python `google-genai` SDK:
-- Located in Django [`investigations/views.py`](file:///c:/Users/samyu/Desktop/test/fraudshield-backend/investigations/views.py).
-- Analyzes case signals, z-scores, graph connectivity, and risk rule outputs.
-- Synthesizes a human-readable **Executive Summary**, **Risk Drivers**, **Graph Anomaly Highlights**, and **Actionable Recommendations**.
+Powered by **Google Gemini 1.5 Flash** (via the `google-genai` SDK):
+- Located in Django `investigations/views.py`.
+- Evaluates case signals, structured JSON artifacts, z-scores, graph connectivity, and risk rules.
+- Autonomously generates a human-readable **Executive Summary**, **Risk Drivers**, **Graph Anomaly Highlights**, and **Actionable Recommendations** on the Investigation dashboard.
 
 ---
 
-## 💾 Database Schema & Fallback Mechanics
+## 💾 Database Schema & Hardening Mechanics
 
-To guarantee **zero downtime** and deterministic demo behavior:
-- **Primary Data Store**: Neon Serverless PostgreSQL containing historical entity profiles (`UserAccount`, `PaymentMethod`, `DeviceFingerprint`, `IPAddress`).
-- **Resilient Fallback Mechanism**: If the database connection times out or if demo entities (`S*` screening codes, `P*` payment tokens, `D*` devices) are queried, the engine seamlessly utilizes [`src/services/mockData.js`](file:///c:/Users/samyu/Desktop/test/fraudshield-backend/src/services/mockData.js). This ensures predictable, reproducible evaluations for critical test cases (such as High-Weight Suspicious Routes evaluating to Critical Risk).
+FraudShield relies heavily on **Neon Serverless PostgreSQL**. Recent hardening ensures:
+- **Null Safety**: Entities fetched from the DB strictly handle missing records via `EntityNotFoundError`, stripping away legacy silent mock fallbacks.
+- **Concurrent Request Safety**: Session-level Postgres advisory locks (`pg_try_advisory_lock`) on `hashtext(booking_ref)` prevent duplicate concurrent POST requests from causing duplicate rule processing or double-writes.
+- **Velocity Efficiency**: DB logic uses highly optimized `FILTER (WHERE ...)` aggregations across index-backed queries to fetch 30-day baselines in a single pass.
 
 ---
 
@@ -148,18 +141,19 @@ To guarantee **zero downtime** and deterministic demo behavior:
 ### Prerequisites
 - Node.js (v18+)
 - Python (v3.10+)
-- Pipenv / Virtual environment
+- Postgres (Neon DB URL)
 
 ### Running the Services
 
 1. **Express Screening Engine**:
    ```bash
-   npm start
+   npm run dev
    # Runs on http://localhost:3000
    ```
 
 2. **Django Analytics & Copilot Backend**:
    ```bash
+   cd intelligence
    python manage.py runserver 127.0.0.1:8000 --noreload
    # Runs on http://localhost:8000
    ```
@@ -167,7 +161,7 @@ To guarantee **zero downtime** and deterministic demo behavior:
 3. **FastAPI ML Service**:
    ```bash
    cd ml
-   uvicorn main:app --reload --port 8001
+   uvicorn service.app:app --reload --port 8001
    # Runs on http://localhost:8001
    ```
 

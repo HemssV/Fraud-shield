@@ -54,7 +54,7 @@ async function upsertAccount({ shipper_id, account_number, account_type = 'BUSIN
 async function getAccountProfile(account_number) {
   const { rows } = await db.query(
     `SELECT
-       a.account_id, a.account_number, a.account_type, a.status,
+       a.account_id, a.shipper_id, a.account_number, a.account_type, a.status,
        a.opened_at, a.last_profile_change_at, a.last_password_change_at,
        s.external_ref AS shipper_ref, s.company_name, s.is_trusted,
        sp.total_shipments, sp.avg_daily_volume, sp.avg_weight_kg,
@@ -82,6 +82,17 @@ async function getAccountProfile(account_number) {
   return rows[0] || null;
 }
 
+/**
+ * Get account id by shipper_ref
+ */
+async function getAccountByShipperRef(external_ref) {
+  const { rows } = await db.query(
+    `SELECT a.account_id FROM accounts a JOIN shippers s ON a.shipper_id = s.shipper_id WHERE s.external_ref = $1`,
+    [external_ref]
+  );
+  return rows[0]?.account_id || null;
+}
+
 // ─── DEVICES ───────────────────────────────────────────────────────────────
 
 /**
@@ -98,6 +109,17 @@ async function upsertDevice({ fingerprint_hash, device_type = 'api-client', is_f
     [fingerprint_hash, device_type, is_flagged]
   );
   return rows[0];
+}
+
+/**
+ * Get a device by fingerprint_hash.
+ */
+async function getDevice(fingerprint_hash) {
+  const { rows } = await db.query(
+    `SELECT device_id, linked_account_count, is_flagged, first_seen_at FROM devices WHERE fingerprint_hash = $1`,
+    [fingerprint_hash]
+  );
+  return rows[0] || null;
 }
 
 /**
@@ -163,6 +185,17 @@ async function upsertPayment({ payment_token, method_type = 'CREDIT_CARD', last4
 }
 
 /**
+ * Get a payment by payment_token.
+ */
+async function getPayment(payment_token) {
+  const { rows } = await db.query(
+    `SELECT payment_id, is_flagged, first_seen_at FROM payments WHERE payment_token = $1`,
+    [payment_token]
+  );
+  return rows[0] || null;
+}
+
+/**
  * Link a payment to an account.
  */
 async function linkPaymentToAccount(account_id, payment_id, holder_name_matches) {
@@ -203,6 +236,18 @@ async function upsertAddress({ city, state, country = 'IN', address_type = 'UNKN
     [normalized_hash, city, state || null, country, address_type, confidence_score || null, is_high_risk]
   );
   return rows[0];
+}
+
+/**
+ * Get an address by city+state+country hash.
+ */
+async function getAddress(city, state, country = 'IN') {
+  const normalized_hash = `${city}-${state || ''}-${country}`.toLowerCase().replace(/\s+/g, '_');
+  const { rows } = await db.query(
+    `SELECT address_id, confidence_score, is_high_risk FROM addresses WHERE normalized_hash = $1`,
+    [normalized_hash]
+  );
+  return rows[0] || null;
 }
 
 // ─── SHIPMENTS ─────────────────────────────────────────────────────────────
@@ -433,13 +478,13 @@ async function logAuditEvent({ action, entity_type, entity_id, shipment_id, acto
 
 module.exports = {
   // Shipper/Account
-  upsertShipper, upsertAccount, getAccountProfile,
+  upsertShipper, upsertAccount, getAccountProfile, getAccountByShipperRef,
   // Devices
-  upsertDevice, linkDeviceToAccount, getDeviceFraudSignals,
+  upsertDevice, getDevice, linkDeviceToAccount, getDeviceFraudSignals,
   // Payments
-  upsertPayment, linkPaymentToAccount, isPaymentKnownForAccount,
+  upsertPayment, getPayment, linkPaymentToAccount, isPaymentKnownForAccount,
   // Addresses
-  upsertAddress,
+  upsertAddress, getAddress,
   // Shipments
   createShipment, updateShipmentStatus, getShipmentVelocity,
   // Risk pipeline

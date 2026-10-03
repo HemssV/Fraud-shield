@@ -37,36 +37,28 @@ async function screenShipment(booking) {
   let dbIds = {};
   let accountProfile = null;
   let deviceSignalData = null;
+  const featuresMeta = { missing_entities: {} };
 
   try {
-    dbIds = await _persistEntities(booking, bookingRef);
+    dbIds = await _persistEntities(booking, bookingRef, featuresMeta);
     accountProfile = dbIds.accountProfile;
     deviceSignalData = dbIds.deviceSignalData;
   } catch (dbErr) {
-    logger.warn('DB entity upsert failed — using mockData profiles', { error: dbErr.message });
-    // Fallback: use rich shipper profiles from mockData.js so the ML model
-    // gets real behavioural baselines instead of treating everyone as a new account.
-    accountProfile = mockAccounts[booking.shipper_id] || null;
+    if (dbErr.name === 'EntityNotFoundError') throw dbErr;
+    logger.warn('DB entity lookup/upsert failed', { error: dbErr.message });
+    throw dbErr; // Or we can return a 503 Service Unavailable, but let it throw for now
   }
 
   // ─── STEP 2: Build upstream signal objects (from DB or mock fallback) ───────
-  // Always prefer mockData for demo entities (S*, P*) to ensure consistent demo behavior,
-  // even if the DB successfully persisted an empty/new row for them.
-  const finalAccountProfile = mockAccounts[booking.shipper_id] || accountProfile;
-  const account = _buildAccountSignal(booking, finalAccountProfile);
-  
-  const mockPaymentData = mockPayments[booking.payment_id] || null;
-  const payment = _buildPaymentSignal(booking, dbIds.paymentRow, mockPaymentData);
-  
-  // For devices and addresses, we rely on the builders which can be updated similarly if needed
-  const mockDeviceData = mockFraudSignals[booking.device_id] || null;
-  const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData, mockDeviceData);
-  
-  const mockAddressData = mockAddressConfidence[booking.destination] || null;
-  const addressData = _buildAddressSignal(booking, dbIds.destAddressRow, mockAddressData);
+  // Note: we removed the mockData fallbacks since Phase 1.1 dictates DB lookup or throw.
+  const account = _buildAccountSignal(booking, accountProfile);
+  const payment = _buildPaymentSignal(booking, dbIds.paymentRow);
+  const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData);
+  const addressData = _buildAddressSignal(booking, dbIds.destAddressRow);
 
   // ─── STEP 3: Generate engineered features ─────────────────────────────────
   const features = generateFeatures(booking, account, payment, deviceSignals, addressData);
+  Object.assign(features._meta, featuresMeta);
 
   // ─── STEP 4: Run Rule Engine ───────────────────────────────────────────────
   const ruleResult = evaluateRules(features);
@@ -122,7 +114,11 @@ async function screenShipment(booking) {
           entity_type: 'SHIPMENT',
           entity_id: dbIds.shipmentId,
           shipment_id: dbIds.shipmentId,
-          after_state: { risk_score: aggregatedRisk.risk_score, action: decision.action },
+          after_state: { 
+            risk_score: aggregatedRisk.risk_score, 
+            action: decision.action,
+            missing_entities: features._meta.missing_entities
+          },
         }),
       ];
 
@@ -222,51 +218,74 @@ async function screenShipment(booking) {
 
 // ─── ENTITY PERSISTENCE ───────────────────────────────────────────────────────
 
-async function _persistEntities(booking, bookingRef) {
-  // 1. Shipper
-  const shipperId = await repo.upsertShipper({
-    external_ref: booking.shipper_id,
-    company_name: booking.shipper_id,
-  });
+async function _persistEntities(booking, bookingRef, featuresMeta) {
+  const autocreate = process.env.DEMO_AUTOCREATE_ENTITIES === 'true';
+  let shipperId, accountId, deviceRow, paymentRow, originAddr, destAddr, accountProfile;
+  let deviceId = null, paymentId = null;
 
-  // 2. Account
-  const accountId = await repo.upsertAccount({
-    shipper_id: shipperId,
-    account_number: booking.shipper_id,
-  });
+  if (autocreate) {
+    shipperId = await repo.upsertShipper({ external_ref: booking.shipper_id, company_name: booking.shipper_id });
+    accountId = await repo.upsertAccount({ shipper_id: shipperId, account_number: booking.shipper_id });
+    
+    [deviceRow, paymentRow, originAddr, destAddr, accountProfile] = await Promise.all([
+      repo.upsertDevice({ fingerprint_hash: booking.device_id || `unknown-${Date.now()}`, device_type: 'api-client' }),
+      booking.payment_id ? repo.upsertPayment({ payment_token: booking.payment_id, method_type: 'CREDIT_CARD' }) : Promise.resolve(null),
+      repo.upsertAddress({ city: booking.origin || 'Unknown', country: 'IN' }),
+      repo.upsertAddress({ city: booking.destination || 'Unknown', country: 'IN' }),
+      repo.getAccountProfile(booking.shipper_id),
+    ]);
+    deviceId = deviceRow.device_id;
+    paymentId = paymentRow ? paymentRow.payment_id : null;
+  } else {
+    // Normal mode: do not autocreate shipper/account/device/payment.
+    accountProfile = await repo.getAccountProfile(booking.shipper_id);
+    if (!accountProfile) {
+      const { EntityNotFoundError } = require('../utils/errors');
+      throw new EntityNotFoundError(`Account ${booking.shipper_id} not found.`);
+    }
+    accountId = accountProfile.account_id;
+    shipperId = accountProfile.shipper_ref; // Wait, actually getAccountProfile doesn't return shipper_id UUID, but we need it for shipments table.
+    
+    // Let's get actual shipper_id from accounts table via getAccountProfile? No, we need to modify getAccountProfile to return shipper_id.
+    // For now, I'll add a quick query if needed. Or I can just fetch it:
+    
+    [deviceRow, paymentRow] = await Promise.all([
+      repo.getDevice(booking.device_id || ''),
+      booking.payment_id ? repo.getPayment(booking.payment_id) : Promise.resolve(null)
+    ]);
+    
+    deviceId = deviceRow ? deviceRow.device_id : null;
+    paymentId = paymentRow ? paymentRow.payment_id : null;
+    
+    if (!deviceRow) featuresMeta.missing_entities = { ...featuresMeta.missing_entities, device: true };
+    if (!paymentRow && booking.payment_id) featuresMeta.missing_entities = { ...featuresMeta.missing_entities, payment: true };
 
-  // 3-6. Upsert Device, Payment, Addresses, and Account Profile in parallel
-  const [deviceRow, paymentRow, originAddr, destAddr, accountProfile] = await Promise.all([
-    repo.upsertDevice({
-      fingerprint_hash: booking.device_id || `unknown-${Date.now()}`,
-      device_type: 'api-client',
-    }),
-    booking.payment_id
-      ? repo.upsertPayment({
-          payment_token: booking.payment_id,
-          method_type: 'CREDIT_CARD',
-        })
-      : Promise.resolve(null),
-    repo.upsertAddress({ city: booking.origin || 'Unknown', country: 'IN' }),
-    repo.upsertAddress({ city: booking.destination || 'Unknown', country: 'IN' }),
-    repo.getAccountProfile(booking.shipper_id),
-  ]);
-
-  const paymentId = paymentRow ? paymentRow.payment_id : null;
+    // We STILL need to upsert addresses because addresses are ephemeral per shipment usually
+    [originAddr, destAddr] = await Promise.all([
+      repo.upsertAddress({ city: booking.origin || 'Unknown', country: 'IN' }),
+      repo.upsertAddress({ city: booking.destination || 'Unknown', country: 'IN' }),
+    ]);
+  }
 
   // Link device/payment and fetch signals in parallel
-  const [deviceSignalData] = await Promise.all([
-    repo.getDeviceFraudSignals(deviceRow.device_id),
-    repo.linkDeviceToAccount(accountId, deviceRow.device_id).catch(() => {}),
-    paymentId ? repo.linkPaymentToAccount(accountId, paymentId, null).catch(() => {}) : Promise.resolve(),
-  ]);
+  let deviceSignalData = null;
+  if (deviceId) {
+    const promises = [repo.getDeviceFraudSignals(deviceId)];
+    if (autocreate) {
+      promises.push(repo.linkDeviceToAccount(accountId, deviceId).catch(() => {}));
+      if (paymentId) promises.push(repo.linkPaymentToAccount(accountId, paymentId, null).catch(() => {}));
+    }
+    const results = await Promise.all(promises);
+    deviceSignalData = results[0];
+  }
 
   // 7. Shipment
+  // 7. Shipment (We need shipper_id! getAccountProfile needs to return it.)
   const shipmentRow = await repo.createShipment({
     booking_ref: bookingRef,
     account_id: accountId,
-    shipper_id: shipperId,
-    device_id: deviceRow.device_id,
+    shipper_id: autocreate ? shipperId : accountProfile.shipper_id, 
+    device_id: deviceId,
     payment_id: paymentId,
     origin_address_id: originAddr.address_id,
     dest_address_id: destAddr.address_id,
@@ -278,7 +297,7 @@ async function _persistEntities(booking, bookingRef) {
   });
 
   return {
-    shipperId, accountId, deviceId: deviceRow.device_id,
+    shipperId: autocreate ? shipperId : accountProfile.shipper_id, accountId, deviceId,
     paymentId, deviceRow, paymentRow,
     originAddressRow: originAddr, destAddressRow: destAddr,
     shipmentId: shipmentRow.shipment_id,
@@ -348,12 +367,10 @@ function _buildAccountSignal(booking, dbProfile) {
   };
 }
 
-function _buildPaymentSignal(booking, paymentRow, mockPayment = null) {
+function _buildPaymentSignal(booking, paymentRow) {
   if (!booking.payment_id) return null;
 
-  // Always use rich mock payment data if available to ensure demo consistency
-  if (mockPayment) return mockPayment;
-  const isNew = paymentRow && new Date(paymentRow.first_seen_at) > new Date(Date.now() - 3600000);
+  const isNew = paymentRow ? new Date(paymentRow.first_seen_at) > new Date(Date.now() - 3600000) : true;
   return {
     payment_id: booking.payment_id,
     payment_type: 'CREDIT_CARD',
@@ -373,9 +390,7 @@ function _buildPaymentSignal(booking, paymentRow, mockPayment = null) {
   };
 }
 
-function _buildDeviceSignal(booking, deviceRow, signalData, mockDevice = null) {
-  if (mockDevice) return mockDevice;
-  
+function _buildDeviceSignal(booking, deviceRow, signalData) {
   if (!deviceRow) {
     return {
       device_id: booking.device_id || 'unknown',
@@ -411,9 +426,7 @@ function _buildDeviceSignal(booking, deviceRow, signalData, mockDevice = null) {
   };
 }
 
-function _buildAddressSignal(booking, addrRow, mockAddress = null) {
-  if (mockAddress) return mockAddress;
-  
+function _buildAddressSignal(booking, addrRow) {
   const city = booking.destination || 'Unknown';
   const score = addrRow?.confidence_score != null ? addrRow.confidence_score / 100 : 0.7;
   return {

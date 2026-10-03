@@ -148,16 +148,29 @@ function generateBehavioralFeatures(booking, account) {
     }
   }
 
+  // 1.5 Feature bounds and clipping
+  let finalWeightZScore = Math.round(weightZScore * 100) / 100;
+  if (finalWeightZScore < -5) finalWeightZScore = -5;
+  if (finalWeightZScore > 10) finalWeightZScore = 10;
+  
+  let finalWeightRatio = Math.round(weightRatio * 100) / 100;
+  if (finalWeightRatio < 0) finalWeightRatio = 0;
+  if (finalWeightRatio > 50) finalWeightRatio = 50;
+
+  let finalPackageCountRatio = Math.round(packageCountRatio * 100) / 100;
+  if (finalPackageCountRatio < 0) finalPackageCountRatio = 0;
+  if (finalPackageCountRatio > 20) finalPackageCountRatio = 20;
+
   return {
-    weight_z_score: Math.round(weightZScore * 100) / 100,
-    weight_ratio_to_avg: Math.round(weightRatio * 100) / 100,
+    weight_z_score: finalWeightZScore,
+    weight_ratio_to_avg: finalWeightRatio,
     weight_exceeds_max: booking.weight > (profile.max_historical_weight || Infinity),
     is_unusual_hour: isUnusualHour,
     booking_hour: bookingHour,
     is_new_destination: isNewDestination,
     is_new_origin: isNewOrigin,
     is_unusual_service: isUnusualService,
-    package_count_ratio: Math.round(packageCountRatio * 100) / 100,
+    package_count_ratio: finalPackageCountRatio,
     total_historical_shipments: profile.total_shipments || 0,
     is_low_history: (profile.total_shipments || 0) < 10,
     days_until_departure,

@@ -4,7 +4,7 @@ import { api } from '../services/api';
 import {
   Play, RefreshCw, AlertTriangle, ShieldCheck, XCircle, Clock, 
   ArrowRight, Bot, Sparkles, CheckCircle2, ChevronRight, Zap, 
-  Users, Laptop, CreditCard, MapPin, Gauge, Activity, Shield
+  Users, Laptop, CreditCard, MapPin, Gauge, Activity, Shield, Database
 } from 'lucide-react';
 
 const SCENARIO_PRESETS = [

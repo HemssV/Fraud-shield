@@ -74,7 +74,15 @@ function generateFeatures(booking, account, payment, deviceSignals, addressData,
  * Behavioral features — compare current shipment against historical profile
  */
 function generateBehavioralFeatures(booking, account) {
-  const profile = account?.historical_profile || {};
+  // 5.1 Profile max age limit (ignore profiles older than 180 days)
+  let profile = account?.historical_profile || {};
+  const profileUpdatedDays = account?.last_profile_change_at 
+    ? (Date.now() - new Date(account.last_profile_change_at)) / 86400000 
+    : 0;
+  
+  if (profileUpdatedDays > 180) {
+    profile = {}; // Stale profile, ignore behavioral baselines
+  }
 
   const avgWeight = profile.avg_weight || 0;
   const stdWeight = profile.std_weight_kg || (avgWeight * 0.3);  // estimate if not available
@@ -229,6 +237,9 @@ function generateIdentityFeatures(booking, account, deviceSignals) {
     password_changed_recently: passwordChangedRecently,
     profile_updated_recently: profileUpdatedRecently,
     account_age_days: accountAge,
+    
+    // 5.2 Familiar discount condition
+    is_familiar: (account?.is_trusted === true) || (accountAge > 180 && account?.previous_fraud_cases === 0),
     is_new_account: isNewAccount,
     account_status: account?.account_status || 'UNKNOWN',
     is_suspended: isSuspended,

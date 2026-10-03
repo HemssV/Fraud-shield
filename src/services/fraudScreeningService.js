@@ -495,6 +495,11 @@ function aggregateRisk(ruleResult, mlResult, deviceSignals, features) {
     if (features.identity?.is_suspended) riskScore = Math.max(riskScore, 85);
     if (features.device?.device_blacklisted || features.device?.ip_blacklisted) riskScore = Math.max(riskScore, 80);
     if (features.identity?.previous_fraud_cases >= 3) riskScore = Math.max(riskScore, 90);
+
+    // 5.2 Familiar discount condition
+    if (features.identity?.is_familiar) {
+      riskScore = Math.max(0, riskScore - 15);
+    }
   }
 
   riskScore = Math.round(Math.min(100, Math.max(0, riskScore)));

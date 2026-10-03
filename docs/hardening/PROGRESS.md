@@ -32,9 +32,9 @@
 - [x] 4.4 Model bounding (Status: DONE)
 
 ## PHASE 5: ADAPTIVE BEHAVIORAL PROFILING
-- [ ] 5.1 Profile max age limit (Status: NOT STARTED)
-- [ ] 5.2 Familiar discount conditions (Status: NOT STARTED)
-- [ ] 5.3 CONFIRMED_FRAUD handling and retrain script (Status: NOT STARTED)
+- [x] 5.1 Profile max age limit (Status: DONE)
+- [x] 5.2 Familiar discount conditions (Status: DONE)
+- [x] 5.3 CONFIRMED_FRAUD handling and retrain script (Status: DONE)
 
 ## PHASE 6: RULES ENGINE
 - [ ] 6.1 Move rules to constants (Status: NOT STARTED)

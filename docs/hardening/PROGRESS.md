@@ -11,7 +11,7 @@
 - [x] 1.5 Feature bounds and clipping (Status: DONE)
 - [x] 1.6 Canonical feature order (Status: DONE)
 - [x] 1.7 Score combination (Status: DONE)
-- [ ] 1.8 Duplicate/concurrent scoring (Status: NOT STARTED)
+- [x] 1.8 Duplicate/concurrent scoring (Status: DONE)
 
 ## PHASE 2: INPUT VALIDATION
 - [ ] 2.1 Shared validator schema (Status: NOT STARTED)

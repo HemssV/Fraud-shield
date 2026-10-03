@@ -10,6 +10,8 @@
 
 const { v4: uuidv4 } = require('uuid');
 const repo = require('../db/repository');
+const { getClient } = require('../db');
+const { AppError } = require('../middleware/errorHandler');
 const { generateFeatures } = require('../features/featureGenerator');
 const { evaluateRules } = require('../rules/ruleEngine');
 const { scoreShipment } = require('../ml/fraudModel');
@@ -28,8 +30,24 @@ const WEIGHTS = { rules: 0.40, ml: 0.40, graph: 0.20 };
  * @returns {object} Complete fraud assessment
  */
 async function screenShipment(booking) {
-  const pipelineStart = Date.now();
   const bookingRef = booking.shipment_id || `SH${uuidv4().split('-')[0].toUpperCase()}`;
+  
+  const client = await getClient();
+  try {
+    const { rows } = await client.query(`SELECT pg_try_advisory_lock(hashtext($1)) as acquired`, [bookingRef]);
+    if (!rows[0].acquired) {
+      throw new AppError(`Concurrent screening in progress for booking ${bookingRef}`, 409);
+    }
+    
+    return await _screenShipmentCore(booking, bookingRef);
+  } finally {
+    await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [bookingRef]);
+    client.release();
+  }
+}
+
+async function _screenShipmentCore(booking, bookingRef) {
+  const pipelineStart = Date.now();
 
   logger.info('🔍 Fraud screening started', { booking_ref: bookingRef, shipper_id: booking.shipper_id });
 

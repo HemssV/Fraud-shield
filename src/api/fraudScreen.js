@@ -58,6 +58,7 @@ router.post('/', async (req, res, next) => {
 
     res.json(assessment);
   } catch (err) {
+    console.error('FRAUD_SCREEN_ERROR:', err);
     next(err);
   }
 });

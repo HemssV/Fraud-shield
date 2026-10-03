@@ -15,7 +15,8 @@ const FEATURE_SPEC = {
     'is_new_device', 'is_new_payment_for_account', 'password_changed_recently',
     'profile_updated_recently', 'account_age_days', 'is_new_account',
     'account_status', 'is_suspended', 'is_under_investigation',
-    'is_verified', 'previous_fraud_cases', 'previous_review_cases'
+    'is_verified', 'previous_fraud_cases', 'previous_review_cases',
+    'is_familiar'
   ],
   payment: [
     'payment_found', 'is_new_payment_method', 'cardholder_match',

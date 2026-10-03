@@ -317,22 +317,24 @@ async function _persistEntities(booking, bookingRef, featuresMeta) {
     deviceSignalData = results[0];
   }
 
-  // 7. Shipment
   // 7. Shipment (We need shipper_id! getAccountProfile needs to return it.)
-  const shipmentRow = await repo.createShipment({
-    booking_ref: bookingRef,
-    account_id: accountId,
-    shipper_id: autocreate ? shipperId : accountProfile.shipper_id, 
-    device_id: deviceId,
-    payment_id: paymentId,
-    origin_address_id: originAddr.address_id,
-    dest_address_id: destAddr.address_id,
-    service: booking.service_type || 'GROUND',
-    weight_kg: booking.weight || 1,
-    package_count: booking.package_count || 1,
-    ip_address: booking.ip_address,
-    booked_at: booking.booking_timestamp || new Date().toISOString(),
-  });
+  let shipmentRow = { shipment_id: `SIM-${uuidv4()}` };
+  if (!booking.simulate) {
+    shipmentRow = await repo.createShipment({
+      booking_ref: bookingRef,
+      account_id: accountId,
+      shipper_id: autocreate ? shipperId : accountProfile.shipper_id, 
+      device_id: deviceId,
+      payment_id: paymentId,
+      origin_address_id: originAddr.address_id,
+      dest_address_id: destAddr.address_id,
+      service: booking.service_type || 'GROUND',
+      weight_kg: booking.weight || 1,
+      package_count: booking.package_count || 1,
+      ip_address: booking.ip_address,
+      booked_at: booking.booking_timestamp || new Date().toISOString(),
+    });
+  }
 
   return {
     shipperId: autocreate ? shipperId : accountProfile.shipper_id, accountId, deviceId,

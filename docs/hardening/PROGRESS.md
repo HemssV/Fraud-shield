@@ -49,9 +49,9 @@
 - [x] 7.5 Dashboard stats (Status: DONE)
 
 ## PHASE 8: TESTS AND VALIDATION
-- [ ] 8.1 Automated tests (Status: NOT STARTED)
-- [ ] 8.2 validate_pipeline.js script (Status: NOT STARTED)
-- [ ] 8.3 npm run scripts (Status: NOT STARTED)
+- [x] 8.1 Automated tests (Status: DONE)
+- [x] 8.2 validate_pipeline.js script (Status: DONE)
+- [x] 8.3 npm run scripts (Status: DONE)
 
 ## PHASE 9: DOCUMENTATION
 - [ ] 9.1 README.md (Status: NOT STARTED)

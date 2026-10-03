@@ -2,10 +2,11 @@
 const logger = require('../utils/logger');
 
 class AppError extends Error {
-  constructor(message, statusCode, code) {
+  constructor(message, statusCode, code, details = null) {
     super(message);
     this.statusCode = statusCode;
     this.code = code || 'INTERNAL_ERROR';
+    this.details = details;
     this.isOperational = true;
     Error.captureStackTrace(this, this.constructor);
   }
@@ -29,6 +30,7 @@ function errorHandler(err, req, res, _next) {
     error: {
       code,
       message: err.isOperational ? err.message : 'An unexpected error occurred',
+      ...(err.details && { details: err.details }),
       ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
     },
   });

@@ -33,8 +33,12 @@ const bookingSchema = Joi.object({
   package_count: Joi.number().integer().min(1).default(1)
     .description('Volume anomaly detection'),
 
-  booking_timestamp: Joi.string().isoDate().optional()
+  booking_timestamp: Joi.date().iso().default(() => new Date().toISOString())
     .description('Timing/frequency analysis — auto-generated if not provided'),
+
+  departure_time: Joi.date().iso().min(Joi.ref('booking_timestamp')).optional()
+    .messages({ 'date.min': 'departure_time cannot be before booking_timestamp' })
+    .description('Time of departure'),
 
   ip_address: Joi.string().ip({ version: ['ipv4', 'ipv6'] }).optional()
     .description('IP reputation and account takeover signals'),

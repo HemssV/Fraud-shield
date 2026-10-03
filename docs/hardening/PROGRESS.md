@@ -14,9 +14,9 @@
 - [x] 1.8 Duplicate/concurrent scoring (Status: DONE)
 
 ## PHASE 2: INPUT VALIDATION
-- [ ] 2.1 Shared validator schema (Status: NOT STARTED)
-- [ ] 2.2 Past departure dates (Status: NOT STARTED)
-- [ ] 2.3 Structured errors (Status: NOT STARTED)
+- [x] 2.1 Shared validator schema (Status: DONE)
+- [x] 2.2 Past departure dates (Status: DONE)
+- [x] 2.3 Structured errors (Status: DONE)
 
 ## PHASE 3: DATABASE AND INFRASTRUCTURE
 - [ ] 3.1 Pool config (Status: NOT STARTED)

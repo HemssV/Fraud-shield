@@ -44,14 +44,11 @@ router.post('/', async (req, res, next) => {
     });
 
     if (error) {
-      const details = error.details.map(d => d.message).join('; ');
-      throw new AppError(`Validation error: ${details}`, 400, 'VALIDATION_ERROR');
+      const details = error.details.map(d => ({ field: d.path.join('.'), message: d.message }));
+      throw new AppError('Validation error', 400, 'VALIDATION_ERROR', details);
     }
 
-    // Default booking_timestamp to now if not provided
-    if (!bookingData.booking_timestamp) {
-      bookingData.booking_timestamp = new Date().toISOString();
-    }
+
 
     const screeningInput = {
       shipment_id: shipment_id || `SH${Date.now()}`,

@@ -44,18 +44,15 @@ router.post('/', async (req, res, next) => {
     });
 
     if (error) {
-      const details = error.details.map(d => d.message).join('; ');
-      throw new AppError(`Validation error: ${details}`, 400, 'VALIDATION_ERROR');
+      const details = error.details.map(d => ({ field: d.path.join('.'), message: d.message }));
+      throw new AppError('Validation error', 400, 'VALIDATION_ERROR', details);
     }
 
     // ── Generate server-side fields ──
     const shipmentId = `SH${uuidv4().split('-')[0].toUpperCase()}`;
     const createdAt = new Date().toISOString();
 
-    // Default booking_timestamp to now if not provided
-    if (!bookingData.booking_timestamp) {
-      bookingData.booking_timestamp = createdAt;
-    }
+    // bookingData.booking_timestamp is populated by Joi default if omitted
 
     const booking = {
       shipment_id: shipmentId,

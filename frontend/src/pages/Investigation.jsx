@@ -55,14 +55,19 @@ export default function Investigation() {
         console.warn('Backend detail call failed, providing rich fallback:', err);
         // Fallback case generator for rich demonstration
         if (isMounted) {
-          const matchedQueue = QUEUE_CASES.find(c => c.id === currentCaseId) || QUEUE_CASES[0];
-          const isCritical = matchedQueue.score >= 80;
-          const isHigh = matchedQueue.score >= 50;
+          const matchedQueue = QUEUE_CASES.find(c => c.id === currentCaseId);
+          const isCritical = matchedQueue ? matchedQueue.score >= 80 : true;
+          const isHigh = matchedQueue ? matchedQueue.score >= 50 : true;
+          
+          // Generate a dynamic route if not in queue
+          const defaultOrigin = matchedQueue ? matchedQueue.route.split(' → ')[0] : 'Mumbai';
+          const defaultDest = matchedQueue ? matchedQueue.route.split(' → ')[1] : 'Delhi';
 
           setCaseData({
+            is_mock_fallback: true,
             case_id: `CASE-${currentCaseId}`,
-            status: matchedQueue.status || 'OPEN',
-            priority: matchedQueue.priority || 'HIGH',
+            status: matchedQueue?.status || 'OPEN',
+            priority: matchedQueue?.priority || 'HIGH',
             opened_at: new Date(Date.now() - 3600000 * 2).toISOString(),
             sla_due_at: new Date(Date.now() + 3600000 * 6).toISOString(),
             verdict: null,
@@ -74,12 +79,12 @@ export default function Investigation() {
             shipment: {
               shipment_id: currentCaseId,
               booking_ref: currentCaseId,
-              service: matchedQueue.service || 'EXPRESS',
+              service: matchedQueue?.service || 'EXPRESS',
               weight_kg: isCritical ? 200.0 : 48.0,
               booked_at: new Date(Date.now() - 3600000 * 2.5).toISOString(),
               status: isCritical ? 'BLOCKED' : 'HELD',
-              origin_city: matchedQueue.route.split(' → ')[0] || 'Chennai',
-              dest_city: matchedQueue.route.split(' → ')[1] || 'Kabul',
+              origin_city: defaultOrigin,
+              dest_city: defaultDest,
             },
             account: {
               account_id: 'ACC-S1001-989',
@@ -90,11 +95,11 @@ export default function Investigation() {
             },
             risk_assessment: {
               assessment_id: `ASSESS-${currentCaseId}`,
-              risk_score: matchedQueue.score,
-              risk_level: matchedQueue.level,
-              fraud_probability: matchedQueue.score / 100,
-              rule_score: Math.min(matchedQueue.score + 10, 95),
-              ml_score: matchedQueue.score,
+              risk_score: matchedQueue?.score || 85,
+              risk_level: matchedQueue?.level || 'HIGH',
+              fraud_probability: (matchedQueue?.score || 85) / 100,
+              rule_score: Math.min((matchedQueue?.score || 85) + 10, 95),
+              ml_score: matchedQueue?.score || 85,
               assessed_at: new Date(Date.now() - 3600000 * 2.2).toISOString(),
             },
             risk_reasons: [
@@ -112,7 +117,7 @@ export default function Investigation() {
                 reason_code: 'HIGH_FRAUD_DESTINATION_ROUTE',
                 category: 'ROUTE',
                 points: 20.0,
-                observed_value: matchedQueue.route.split(' → ')[1],
+                observed_value: defaultDest,
                 baseline_value: 'Domestic Metro Zone',
                 description: 'Destination corridor flagged with elevated interception and interception fraud incidents.'
               },
@@ -143,7 +148,7 @@ export default function Investigation() {
             genai_explanation: {
               explanation_id: `AI-EXP-${currentCaseId}`,
               llm_model: 'Gemini 1.5 Pro (Fraud Copilot)',
-              summary: `This shipment presents critical anomalous markers. Shipper ${isCritical ? 'S4004' : 'S1001'} booked an extreme weight package (${isCritical ? '200' : '48'} kg) to destination corridor ${matchedQueue.route.split(' → ')[1]} using an unrecognized device terminal with masked geolocation. The combination of behavioral weight deviation and identity shift points to a high probability of credential compromise or illicit cargo diversion.`,
+              summary: `This shipment presents critical anomalous markers. Shipper ${isCritical ? 'S4004' : 'S1001'} booked an extreme weight package (${isCritical ? '200' : '48'} kg) to destination corridor ${defaultDest} using an unrecognized device terminal with masked geolocation. The combination of behavioral weight deviation and identity shift points to a high probability of credential compromise or illicit cargo diversion.`,
               recommended_actions: [
                 'Do not release package for dispatch hub transfer.',
                 'Contact primary corporate account holder via verified telephone line.',
@@ -320,6 +325,11 @@ export default function Investigation() {
               <span className={`text-xs px-2.5 py-0.5 rounded-full border font-bold ${getPriorityBadge(caseData.priority)}`}>
                 {caseData.priority} PRIORITY
               </span>
+              {caseData.is_mock_fallback && (
+                <span className="text-[10px] px-2 py-0.5 ml-2 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  DEMO MODE MOCK
+                </span>
+              )}
             </h1>
           </div>
         </div>

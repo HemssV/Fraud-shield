@@ -9,7 +9,7 @@ const NODE_API_BASE = import.meta.env.VITE_NODE_API_URL || 'http://localhost:300
 const djangoClient = axios.create({
   baseURL: DJANGO_API_BASE,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 15000, // 15s timeout — cloud DB round-trips can be slow on first connect
+  timeout: 60000, // 60s timeout — cloud DB round-trips or ML inferences can take a while
 });
 
 const nodeClient = axios.create({

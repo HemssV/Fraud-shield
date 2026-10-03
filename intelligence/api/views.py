@@ -303,6 +303,38 @@ class DashboardRiskDistributionView(APIView):
         return Response(get_risk_distribution(day=day))
 
 
+class DashboardAllView(APIView):
+    """
+    GET /api/v1/dashboard/all/
+
+    Combined endpoint that returns summary, daily trends, recent alerts,
+    and risk distribution in a single response. This eliminates 4 separate
+    HTTP round-trips from the frontend, reducing dashboard load time from
+    ~5s (4 sequential cloud DB connections) to ~1 request.
+    """
+
+    def get(self, request):
+        import concurrent.futures
+
+        days = int(request.query_params.get('days', 7))
+        days = max(1, min(days, 90))
+        limit = int(request.query_params.get('limit', 10))
+
+        # Execute all 4 queries in parallel threads to overlap I/O wait
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            f_summary = pool.submit(get_summary)
+            f_daily = pool.submit(get_daily_trend, days)
+            f_alerts = pool.submit(get_recent_alerts, limit)
+            f_dist = pool.submit(get_risk_distribution)
+
+        return Response({
+            'summary': f_summary.result(),
+            'daily': f_daily.result(),
+            'alerts': f_alerts.result(),
+            'risk_distribution': f_dist.result(),
+        })
+
+
 # ─── Scenario Simulator ───────────────────────────────────────────────────────
 
 class SimulatorRunView(APIView):

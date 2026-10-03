@@ -9,6 +9,7 @@ const NODE_API_BASE = import.meta.env.VITE_NODE_API_URL || 'http://localhost:300
 const djangoClient = axios.create({
   baseURL: DJANGO_API_BASE,
   headers: { 'Content-Type': 'application/json' },
+  timeout: 15000, // 15s timeout — cloud DB round-trips can be slow on first connect
 });
 
 const nodeClient = axios.create({
@@ -45,6 +46,13 @@ export const api = {
     const response = await djangoClient.get('/dashboard/risk-distribution/', {
       params: day ? { day } : {}
     });
+    return response.data;
+  },
+
+  // Combined dashboard endpoint — fetches summary + daily + alerts + risk_distribution
+  // in a single HTTP request (eliminates 4 separate round-trips to cloud DB)
+  getDashboardAll: async () => {
+    const response = await djangoClient.get('/dashboard/all/');
     return response.data;
   },
 

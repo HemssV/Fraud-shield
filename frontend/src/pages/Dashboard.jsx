@@ -160,62 +160,73 @@ export default function Dashboard() {
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionToast, setDecisionToast] = useState(null);
 
-  // Load live data from Backend B, only falling back if empty or network error
+  // Load live data from Backend B using the combined endpoint (1 request instead of 4)
+  // Falls back to individual calls if combined endpoint unavailable, then to mock data.
   useEffect(() => {
-    Promise.all([
-      api.getDashboardSummary().catch(() => null),
-      api.getDashboardDaily(7).catch(() => null),
-      api.getRecentAlerts().catch(() => null),
-      api.getRiskDistribution().catch(() => null)
-    ]).then(([summaryData, trendsData, alertsData, distData]) => {
-      // 1. Process Summary
-      if (summaryData && (summaryData.total_screened !== undefined || summaryData.shipments_screened !== undefined)) {
-        setStats({
-          shipments_screened: summaryData.shipments_screened || summaryData.total_screened || 0,
-          high_risk: summaryData.high_risk || 0,
-          under_review: summaryData.under_review || 0,
-          estimated_loss_prevented: summaryData.estimated_loss_prevented || 0,
-          trend_str: summaryData.trend_str || summaryData.today?.trend_pct || '+0% today'
-        });
-      } else {
+    const loadDashboard = async () => {
+      try {
+        // Try the combined endpoint first (single HTTP request for all data)
+        const data = await api.getDashboardAll();
+
+        // 1. Process Summary
+        if (data.summary && (data.summary.total_screened !== undefined || data.summary.shipments_screened !== undefined)) {
+          setStats({
+            shipments_screened: data.summary.shipments_screened || data.summary.total_screened || 0,
+            high_risk: data.summary.high_risk || 0,
+            under_review: data.summary.under_review || 0,
+            estimated_loss_prevented: data.summary.estimated_loss_prevented || 0,
+            trend_str: data.summary.trend_str || data.summary.today?.trend_pct || '+0% today'
+          });
+        } else {
+          setStats(STAT_MOCKS);
+        }
+
+        // 2. Process Daily Trends
+        if (Array.isArray(data.daily) && data.daily.length > 0) {
+          const formattedTrends = data.daily.map((item, idx) => {
+            const dateObj = item.day ? new Date(item.day) : null;
+            const dayName = dateObj ? dateObj.toLocaleDateString('en-US', { weekday: 'short' }) : `Day ${idx + 1}`;
+            return {
+              name: dayName,
+              day: item.day ? String(item.day).split('T')[0] : null,
+              screened: Number(item.screened || 0),
+              flagged: Number(item.flagged || 0)
+            };
+          }).reverse();
+          setTrends(formattedTrends);
+        } else {
+          setTrends(TREND_MOCKS);
+        }
+
+        // 3. Process Alerts (already sorted by SLA remaining time by Django)
+        if (Array.isArray(data.alerts) && data.alerts.length > 0) {
+          setAlerts(data.alerts);
+          setSelectedAlertId(data.alerts[0].shipment_id);
+        } else {
+          setAlerts(ALERTS_MOCKS);
+          setSelectedAlertId(ALERTS_MOCKS[0].shipment_id);
+        }
+
+        // 4. Process Risk Distribution
+        if (Array.isArray(data.risk_distribution) && data.risk_distribution.some(d => d.value > 0)) {
+          setDistribution(data.risk_distribution);
+        } else {
+          setDistribution(DISTRIBUTION_MOCK);
+        }
+
+      } catch (err) {
+        console.warn('[Dashboard] Combined endpoint failed, falling back to mock data:', err.message);
         setStats(STAT_MOCKS);
-      }
-
-      // 2. Process Daily Trends
-      if (Array.isArray(trendsData) && trendsData.length > 0) {
-        const formattedTrends = trendsData.map((item, idx) => {
-          const dateObj = item.day ? new Date(item.day) : null;
-          const dayName = dateObj ? dateObj.toLocaleDateString('en-US', { weekday: 'short' }) : `Day ${idx + 1}`;
-          return {
-            name: dayName,
-            day: item.day ? String(item.day).split('T')[0] : null,
-            screened: Number(item.screened || 0),
-            flagged: Number(item.flagged || 0)
-          };
-        }).reverse();
-        setTrends(formattedTrends);
-      } else {
         setTrends(TREND_MOCKS);
-      }
-
-      // 3. Process Alerts (already sorted by SLA remaining time by Django)
-      if (Array.isArray(alertsData) && alertsData.length > 0) {
-        setAlerts(alertsData);
-        setSelectedAlertId(alertsData[0].shipment_id);
-      } else {
         setAlerts(ALERTS_MOCKS);
         setSelectedAlertId(ALERTS_MOCKS[0].shipment_id);
-      }
-
-      // 4. Process Risk Distribution
-      if (Array.isArray(distData) && distData.some(d => d.value > 0)) {
-        setDistribution(distData);
-      } else {
         setDistribution(DISTRIBUTION_MOCK);
       }
 
       setLoading(false);
-    });
+    };
+
+    loadDashboard();
   }, []);
 
   // When a user selects a day to inspect on the chart, filter distribution dynamically

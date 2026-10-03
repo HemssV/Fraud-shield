@@ -24,7 +24,10 @@ from intelligence.models import (
 log = logging.getLogger(__name__)
 
 # Lightweight in-memory cache to eliminate cloud database latency
+# TTLs are intentionally long (60-120s) because dashboard analytics
+# tolerate stale data — this avoids repeated 500ms+ cloud DB round-trips.
 _CACHE: dict[str, tuple[Any, float]] = {}
+_CACHE_WARMING = False  # flag to prevent concurrent warming
 
 def get_cached_or_compute(key: str, ttl_seconds: float, compute_fn):
     now = time.time()
@@ -38,6 +41,31 @@ def get_cached_or_compute(key: str, ttl_seconds: float, compute_fn):
 
 def invalidate_dashboard_cache():
     _CACHE.clear()
+
+
+def warm_dashboard_cache():
+    """
+    Pre-populate the in-memory cache with all dashboard data.
+    Call this once at server startup to ensure the first user request is fast.
+    """
+    global _CACHE_WARMING
+    if _CACHE_WARMING:
+        return
+    _CACHE_WARMING = True
+    try:
+        log.info("[CACHE] Warming dashboard cache...")
+        t0 = time.time()
+        get_summary()
+        get_daily_trend(7)
+        get_recent_alerts(15)
+        get_risk_distribution()
+        elapsed = time.time() - t0
+        log.info("[CACHE] Dashboard cache warmed in %.1fs", elapsed)
+    except Exception as exc:
+        log.warning("[CACHE] Cache warming failed: %s", exc)
+    finally:
+        _CACHE_WARMING = False
+
 
 
 def _try_view(sql: str) -> list[dict] | None:
@@ -55,7 +83,7 @@ def _try_view(sql: str) -> list[dict] | None:
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 def get_summary() -> dict[str, Any]:
-    return get_cached_or_compute('dashboard_summary', 10.0, _compute_summary)
+    return get_cached_or_compute('dashboard_summary', 120.0, _compute_summary)
 
 def _compute_summary() -> dict[str, Any]:
     """
@@ -170,7 +198,7 @@ def _compute_summary() -> dict[str, Any]:
 # ─── Daily trend ──────────────────────────────────────────────────────────────
 
 def get_daily_trend(days: int = 7) -> list[dict[str, Any]]:
-    return get_cached_or_compute(f'daily_trend_{days}', 15.0, lambda: _compute_daily_trend(days))
+    return get_cached_or_compute(f'daily_trend_{days}', 120.0, lambda: _compute_daily_trend(days))
 
 def _compute_daily_trend(days: int = 7) -> list[dict[str, Any]]:
     """
@@ -254,7 +282,7 @@ def get_review_queue() -> list[dict[str, Any]]:
 # ─── Risk distribution ────────────────────────────────────────────────────────
 
 def get_risk_distribution(day: str | None = None) -> list[dict[str, Any]]:
-    return get_cached_or_compute(f'risk_dist_{day}', 15.0, lambda: _compute_risk_distribution(day))
+    return get_cached_or_compute(f'risk_dist_{day}', 120.0, lambda: _compute_risk_distribution(day))
 
 def _compute_risk_distribution(day: str | None = None) -> list[dict[str, Any]]:
     """
@@ -279,7 +307,7 @@ def _compute_risk_distribution(day: str | None = None) -> list[dict[str, Any]]:
 # ─── Recent alerts ────────────────────────────────────────────────────────────
 
 def get_recent_alerts(limit: int = 15) -> list[dict[str, Any]]:
-    return get_cached_or_compute(f'recent_alerts_{limit}', 10.0, lambda: _compute_recent_alerts(limit))
+    return get_cached_or_compute(f'recent_alerts_{limit}', 90.0, lambda: _compute_recent_alerts(limit))
 
 def _compute_recent_alerts(limit: int = 15) -> list[dict[str, Any]]:
     """

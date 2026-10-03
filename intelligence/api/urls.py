@@ -32,6 +32,7 @@ urlpatterns = [
     path('dashboard/recent-alerts/', views.DashboardRecentAlertsView.as_view(), name='dashboard-recent-alerts'),
     path('dashboard/fraud-types/', views.DashboardFraudTypesView.as_view(), name='dashboard-fraud-types'),
     path('dashboard/risk-distribution/', views.DashboardRiskDistributionView.as_view(), name='dashboard-risk-distribution'),
+    path('dashboard/all/', views.DashboardAllView.as_view(), name='dashboard-all'),
 
     # ── Scenario Simulator ───────────────────────────────────────────────────
     path('simulator/run/', views.SimulatorRunView.as_view(), name='simulator-run'),

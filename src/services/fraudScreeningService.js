@@ -10,7 +10,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const repo = require('../db/repository');
-const { generateFeatures } = require('../features/featureGenerator');
+const { generateFeatures, generateFeaturesWithFamiliarity } = require('../features/featureGenerator');
 const { evaluateRules } = require('../rules/ruleEngine');
 const { scoreShipment } = require('../ml/fraudModel');
 const { decisionThresholds, accounts: mockAccounts, payments: mockPayments } = require('./mockData');
@@ -57,8 +57,10 @@ async function screenShipment(booking) {
   const deviceSignals = _buildDeviceSignal(booking, dbIds.deviceRow, deviceSignalData);
   const addressData = _buildAddressSignal(booking, dbIds.destAddressRow);
 
-  // ─── STEP 3: Generate engineered features ─────────────────────────────────
-  const features = generateFeatures(booking, account, payment, deviceSignals, addressData);
+  // ─── STEP 3: Generate engineered features (with adaptive behavioral familiarity) ──
+  const features = await generateFeaturesWithFamiliarity(
+    booking, account, payment, deviceSignals, addressData, dbIds.accountId
+  );
 
   // ─── STEP 4: Run Rule Engine ───────────────────────────────────────────────
   const ruleResult = evaluateRules(features);

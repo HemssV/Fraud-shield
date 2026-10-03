@@ -7,11 +7,19 @@
 //   Raw booking + Account profile + Payment + Device signals + Address confidence
 //     → Engineered features (z-scores, ratios, boolean flags, velocities)
 //       → Rules + ML + Graph analysis
+//
+// ADAPTIVE BEHAVIORAL PROFILING:
+//   When a behavior has been analyst-verified as legitimate (FALSE_POSITIVE),
+//   the relevant novelty flag (is_new_destination, is_new_origin, etc.) is
+//   adjusted by behavioral familiarity strength. This ONLY affects behavioral
+//   novelty signals — device, payment, IP, velocity signals remain independent.
 
 const logger = require('../utils/logger');
+const behavioralProfileService = require('../services/behavioralProfileService');
 
 /**
  * Generate engineered features from booking data and upstream service responses.
+ * (Synchronous version — backward compatible, no familiarity integration)
  *
  * @param {object} booking     - The incoming booking request
  * @param {object} account     - Account profile (shipper digital twin)
@@ -46,6 +54,7 @@ function generateFeatures(booking, account, payment, deviceSignals, addressData)
     _meta: {
       feature_generation_ms: Date.now() - startTime,
       feature_count: 0,  // updated below
+      familiarity_applied: false,
     },
   };
 
@@ -60,6 +69,108 @@ function generateFeatures(booking, account, payment, deviceSignals, addressData)
     count: features._meta.feature_count,
     duration_ms: features._meta.feature_generation_ms,
   });
+
+  return features;
+}
+
+
+/**
+ * Generate features WITH adaptive behavioral familiarity.
+ * (Async version — queries the behavioral familiarity service)
+ *
+ * If a behavior has been analyst-verified as familiar for this account,
+ * the novelty flag is suppressed and the familiarity strength is recorded.
+ *
+ * CRITICAL SAFETY: Familiarity ONLY suppresses the behavioral novelty flag.
+ * It does NOT affect:
+ *   - Device signals (new device, blacklisted device, etc.)
+ *   - Payment signals (new payment, fraud history, etc.)
+ *   - Identity signals (recent password change, account takeover indicators)
+ *   - IP signals (VPN, proxy, suspicious IP)
+ *   - Velocity signals (volume spikes)
+ *   - Address risk signals (high-risk area, low confidence)
+ *
+ * FAIL-SAFE: If the familiarity service is unavailable, falls back to
+ * standard feature generation (no familiarity applied = higher scrutiny).
+ */
+async function generateFeaturesWithFamiliarity(booking, account, payment, deviceSignals, addressData, accountId) {
+  // Start with standard feature generation
+  const features = generateFeatures(booking, account, payment, deviceSignals, addressData);
+
+  // If no account ID available, skip familiarity (fail-safe: no reduced scrutiny)
+  if (!accountId) {
+    return features;
+  }
+
+  try {
+    const familiarityResults = {};
+
+    // Check familiarity for behavioral novelty dimensions
+    const checks = [];
+
+    if (features.behavioral.is_new_destination && booking.destination) {
+      checks.push(
+        behavioralProfileService.checkFamiliarity(accountId, 'destination', booking.destination)
+          .then(result => { familiarityResults.destination = result; })
+      );
+    }
+
+    if (features.behavioral.is_new_origin && booking.origin) {
+      checks.push(
+        behavioralProfileService.checkFamiliarity(accountId, 'origin', booking.origin)
+          .then(result => { familiarityResults.origin = result; })
+      );
+    }
+
+    if (features.behavioral.is_unusual_service && booking.service_type) {
+      checks.push(
+        behavioralProfileService.checkFamiliarity(accountId, 'service_type', booking.service_type)
+          .then(result => { familiarityResults.service_type = result; })
+      );
+    }
+
+    await Promise.all(checks);
+
+    // Apply familiarity adjustments to BEHAVIORAL features ONLY
+    let familiarityApplied = false;
+
+    if (familiarityResults.destination?.familiar) {
+      features.behavioral.is_new_destination = false;
+      features.behavioral._destination_familiarity = familiarityResults.destination.strength;
+      familiarityApplied = true;
+    }
+
+    if (familiarityResults.origin?.familiar) {
+      features.behavioral.is_new_origin = false;
+      features.behavioral._origin_familiarity = familiarityResults.origin.strength;
+      familiarityApplied = true;
+    }
+
+    if (familiarityResults.service_type?.familiar) {
+      features.behavioral.is_unusual_service = false;
+      features.behavioral._service_familiarity = familiarityResults.service_type.strength;
+      familiarityApplied = true;
+    }
+
+    features._meta.familiarity_applied = familiarityApplied;
+    features._meta.familiarity_results = familiarityResults;
+
+    if (familiarityApplied) {
+      logger.info('Behavioral familiarity applied to features', {
+        account_id: accountId,
+        adjustments: Object.keys(familiarityResults)
+          .filter(k => familiarityResults[k]?.familiar)
+          .map(k => `${k}:${familiarityResults[k].strength}`),
+      });
+    }
+  } catch (err) {
+    // FAIL-SAFE: familiarity service failure → no adjustments applied
+    // The standard (more suspicious) features remain in place
+    logger.warn('Behavioral familiarity check failed — using standard features', {
+      account_id: accountId,
+      error: err.message,
+    });
+  }
 
   return features;
 }
@@ -305,4 +416,4 @@ function generateVelocityFeatures(booking, account) {
 }
 
 
-module.exports = { generateFeatures };
+module.exports = { generateFeatures, generateFeaturesWithFamiliarity };

@@ -32,6 +32,8 @@ const addressRoutes = require('./api/addressConfidence');
 const fraudScreenRoutes = require('./api/fraudScreen');
 const rulesRoutes = require('./api/rules');
 const riskRoutes = require('./api/risk');
+const behavioralProfileRoutes = require('./api/behavioralProfile');
+const behavioralService = require('./services/behavioralProfileService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -69,6 +71,7 @@ app.use('/api/fraud/screen', fraudScreenRoutes);
 // ⭐ New: standalone rule engine & risk calculator
 app.use('/api/rules/evaluate', rulesRoutes);
 app.use('/api/risk/calculate', riskRoutes);
+app.use('/api/behavioral-profile', behavioralProfileRoutes);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────
 app.use((req, res) => {
@@ -82,16 +85,21 @@ app.use(errorHandler);
 
 // ─── Start server ─────────────────────────────────────────────────────────
 app.listen(PORT, () => {
+  // Initialize behavioral familiarity table
+  behavioralService.ensureTable().catch(e => logger.warn('Behavioral table init:', e.message));
+
   logger.info(`
 ╔══════════════════════════════════════════════════════════════╗
-║          🛡️  FraudShield Backend v2.0                       ║
-║          Neon PostgreSQL — LIVE                              ║
+║          🛡️  FraudShield Backend v2.1                       ║
+║          Adaptive Behavioral Profiling — ACTIVE              ║
 ║          Running on port ${PORT}                               ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  POST /api/bookings              Booking + fraud screen     ║
 ║  POST /api/fraud/screen          Standalone screening       ║
 ║  POST /api/rules/evaluate  ⭐    Rule engine                 ║
 ║  POST /api/risk/calculate  ⭐    Risk aggregator             ║
+║  GET  /api/behavioral-profile/:id ⭐ Behavioral familiarity ║
+║  POST /api/behavioral-profile/feedback ⭐ Analyst feedback  ║
 ║  GET  /api/accounts/:id          Account service            ║
 ║  GET  /api/payments/:id          Payment service            ║
 ║  GET  /api/fraud-signals/:id     Fraud signals              ║

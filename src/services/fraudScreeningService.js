@@ -84,7 +84,12 @@ async function screenShipment(booking) {
   const aggregatedRisk = aggregateRisk(ruleResult, mlResult, deviceSignals, features);
 
   // ─── STEP 7: Decision Engine ──────────────────────────────────────────────
-  const decision = makeDecision(aggregatedRisk.risk_score, aggregatedRisk.risk_level);
+  const decision = makeDecision(aggregatedRisk.risk_score, aggregatedRisk.action_override);
+
+  // If action_override is BLOCK, we force the ML probability to 1.0
+  if (aggregatedRisk.action_override === 'BLOCK') {
+    mlResult.fraud_probability = 1.0;
+  }
 
   // ─── STEP 8: Generate top reasons ─────────────────────────────────────────
   const topReasons = generateTopReasons(ruleResult, mlResult, features);
@@ -456,36 +461,43 @@ function _buildAddressSignal(booking, addrRow) {
 // ─── RISK PIPELINE FUNCTIONS ──────────────────────────────────────────────────
 
 function aggregateRisk(ruleResult, mlResult, deviceSignals, features) {
-  const ruleComponent = ruleResult.rule_score * WEIGHTS.rules;
-  const mlComponent = mlResult.ml_score * WEIGHTS.ml;
-  const graphComponent = (deviceSignals?.risk_score || 0) * WEIGHTS.graph;
+  let riskScore;
+  let actionOverride = null;
 
-  let riskScore = ruleComponent + mlComponent + graphComponent;
+  if (ruleResult.rule_score >= 100) {
+    riskScore = 100;
+    actionOverride = 'BLOCK';
+  } else {
+    const ruleComponent = ruleResult.rule_score * WEIGHTS.rules;
+    const mlComponent = mlResult.ml_score * WEIGHTS.ml;
+    const graphComponent = (deviceSignals?.risk_score || 0) * WEIGHTS.graph;
 
-  if (features.identity?.is_suspended) riskScore = Math.max(riskScore, 85);
-  if (features.device?.device_blacklisted || features.device?.ip_blacklisted) riskScore = Math.max(riskScore, 80);
-  if (features.identity?.previous_fraud_cases >= 3) riskScore = Math.max(riskScore, 90);
+    riskScore = ruleComponent + mlComponent + graphComponent;
+
+    if (features.identity?.is_suspended) riskScore = Math.max(riskScore, 85);
+    if (features.device?.device_blacklisted || features.device?.ip_blacklisted) riskScore = Math.max(riskScore, 80);
+    if (features.identity?.previous_fraud_cases >= 3) riskScore = Math.max(riskScore, 90);
+  }
 
   riskScore = Math.round(Math.min(100, Math.max(0, riskScore)));
-  return { risk_score: riskScore, risk_level: getRiskLevel(riskScore) };
+  return { risk_score: riskScore, risk_level: getRiskLevel(riskScore), action_override: actionOverride };
 }
 
 function getRiskLevel(score) {
-  const t = decisionThresholds;
-  if (score <= t.allow_max)   return 'LOW';
-  if (score <= t.monitor_max) return 'MEDIUM';
-  if (score <= t.verify_max)  return 'HIGH';
-  if (score <= t.review_max)  return 'HIGH';
-  return 'CRITICAL';
+  if (score >= 90) return 'CRITICAL';
+  if (score >= 70) return 'HIGH';
+  if (score >= 40) return 'MEDIUM';
+  return 'LOW';
 }
 
-function makeDecision(riskScore) {
-  const t = decisionThresholds;
-  if (riskScore <= t.allow_max)   return { action: 'ALLOW', reason: 'Risk score within acceptable range' };
-  if (riskScore <= t.monitor_max) return { action: 'ALLOW_MONITOR', reason: 'Low-moderate risk — allow but monitor' };
-  if (riskScore <= t.verify_max)  return { action: 'VERIFY', reason: 'Moderate risk — request step-up verification' };
-  if (riskScore <= t.review_max)  return { action: 'REVIEW', reason: 'High risk — hold for fraud analyst review' };
-  return { action: 'BLOCK', reason: 'Critical risk — multiple high-risk signals detected' };
+function makeDecision(riskScore, actionOverride) {
+  if (actionOverride) return { action: actionOverride, reason: 'Rule score >= 100 triggered immediate block' };
+  
+  if (riskScore >= 90) return { action: 'BLOCK', reason: 'Critical risk — score >= 90' };
+  if (riskScore >= 70) return { action: 'REVIEW', reason: 'High risk — hold for fraud analyst review (score >= 70)' };
+  if (riskScore >= 40) return { action: 'VERIFY', reason: 'Moderate risk — request step-up verification' };
+  if (riskScore > 20) return { action: 'ALLOW_MONITOR', reason: 'Low-moderate risk — allow but monitor' };
+  return { action: 'ALLOW', reason: 'Risk score within acceptable range' };
 }
 
 function generateTopReasons(ruleResult, mlResult, features) {

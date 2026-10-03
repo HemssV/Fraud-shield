@@ -54,11 +54,11 @@
 - [x] 8.3 npm run scripts (Status: DONE)
 
 ## PHASE 9: DOCUMENTATION
-- [ ] 9.1 README.md (Status: NOT STARTED)
-- [ ] 9.2 CHANGES.md (Status: NOT STARTED)
-- [ ] 9.3 DECISIONS.md (Status: NOT STARTED)
-- [ ] 9.4 Assorted docs (Status: NOT STARTED)
-- [ ] 9.5 KNOWN_LIMITATIONS.md (Status: NOT STARTED)
+- [x] 9.1 README.md (Status: DONE)
+- [x] 9.2 CHANGES.md (Status: DONE)
+- [x] 9.3 DECISIONS.md (Status: DONE)
+- [x] 9.4 Assorted docs (Status: DONE)
+- [x] 9.5 KNOWN_LIMITATIONS.md (Status: DONE)
 
 ## DECISIONS LOG
 - No decisions yet.

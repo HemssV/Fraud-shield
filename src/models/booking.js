@@ -42,6 +42,9 @@ const bookingSchema = Joi.object({
 
   ip_address: Joi.string().ip({ version: ['ipv4', 'ipv6'] }).optional()
     .description('IP reputation and account takeover signals'),
+
+  simulate: Joi.boolean().optional()
+    .description('Allow simulated entity autocreation for demo/testing'),
 });
 
 module.exports = { bookingSchema };

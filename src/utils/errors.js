@@ -4,6 +4,7 @@ class EntityNotFoundError extends Error {
     this.name = 'EntityNotFoundError';
     this.code = 'ENTITY_NOT_FOUND';
     this.statusCode = 404;
+    this.isOperational = true;
   }
 }
 

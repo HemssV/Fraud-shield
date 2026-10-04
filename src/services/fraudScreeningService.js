@@ -257,7 +257,7 @@ async function _screenShipmentCore(booking, bookingRef) {
 // ─── ENTITY PERSISTENCE ───────────────────────────────────────────────────────
 
 async function _persistEntities(booking, bookingRef, featuresMeta) {
-  const autocreate = process.env.DEMO_AUTOCREATE_ENTITIES === 'true';
+  const autocreate = process.env.DEMO_AUTOCREATE_ENTITIES === 'true' || booking.simulate === true;
   let shipperId, accountId, deviceRow, paymentRow, originAddr, destAddr, accountProfile;
   let deviceId = null, paymentId = null;
 
